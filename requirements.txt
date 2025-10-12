@@ -1,8 +1,8 @@
 streamlit
-google-genai==1.40.0
+google-genai
 faiss-cpu
 sentence-transformers
-pandas==2.2.2
-transformers==4.44.0
-torch==2.3.0
+pandas
+transformers
+torch
 numpy
