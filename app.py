@@ -6,7 +6,7 @@ import numpy as np
 from transformers import pipeline
 from collections import Counter
 import os
-from google import genai # Assuming API key is handled via environment variable in Streamlit
+from google import genai
 
 # Set Streamlit page config
 st.set_page_config(layout="wide")
@@ -117,7 +117,7 @@ def retrieve(query, top_k=2):
 # Initialize Gemini client (assuming API key in environment)
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
-    st.error("GEMINI_API_KEY environment variable not set.")
+    st.error("GEMINI_API_KEY environment variable not set. Please add it to your Streamlit Cloud secrets.")
     st.stop() # Stop the app if API key is missing
 
 client = genai.Client(api_key=API_KEY)
@@ -139,15 +139,19 @@ def generate_answer(query, retrieved_docs, history):
          for _, row in retrieved_docs.iterrows()]
     )
 
-    memory = "\n".join([f"使用者：{h['query']}\n助理：{h['answer']}" for h in history[-3:]])  # 保留最近3輪
+    # Ensure history contains dictionaries with 'query' and 'answer' keys
+    memory = "\n".join([f"使用者：{h.get('query', '')}\n助理：{h.get('answer', '')}" for h in history[-5:]])  # 保留最近5輪, Use get for safety
+
 
     # 加入情緒回饋 (從歷史記錄中獲取最後一輪的情緒)
     emotion_feedback = ""
     if history:
         last_turn = history[-1]
-        emotion_label = last_turn.get('emotion_label', '未知') # Use .get() for safety
-        score = last_turn.get('emotion_score', 0.0) # Use .get() for safety
-        emotion_feedback = f"請注意，上一次回答的情緒是 {emotion_label} (信心值 {score:.3f})，請在本次回答中保持親切、專業的語氣，並依據對話歷史來調整回應風格。"
+        # Ensure last_turn is a dictionary and has the expected keys
+        if isinstance(last_turn, dict):
+            emotion_label = last_turn.get('emotion_label', '未知') # Use .get() for safety
+            score = last_turn.get('emotion_score', 0.0) # Use .get() for safety
+            emotion_feedback = f"請注意，上一次回答的情緒是 {emotion_label} (信心值 {score:.3f})，請在本次回答中保持親切、專業的語氣，並依據對話歷史來調整回應風格。"
 
 
     prompt = f"""
@@ -193,10 +197,12 @@ def log_trend(emotion_label):
 for message in st.session_state.conversation_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-        if "emotion_label" in message: # Display emotion and source for bot's message
-             st.caption(f"🧠 回覆情緒： {message['emotion_label']}（信心值 {message['emotion_score']:.3f}）")
-        if "source" in message:
-             st.caption(f"📌 引用資料來源：{', '.join(message['source'])}")
+        # Display emotion and source only for assistant messages
+        if message["role"] == "assistant":
+             if "emotion_label" in message:
+                  st.caption(f"🧠 回覆情緒： {message['emotion_label']}（信心值 {message['emotion_score']:.3f}）")
+             if "source" in message:
+                  st.caption(f"📌 引用資料來源：{', '.join(message['source'])}")
 
 
 # Chat input
@@ -218,7 +224,7 @@ if query := st.chat_input("輸入你的旅遊問題..."):
                 trend = log_trend(emotion_label) # Update trend counter
                 source_names = docs['景點名稱_中文'].tolist()
 
-                # Add assistant message to chat history
+                # Add assistant message to chat history, including metadata for history
                 st.session_state.conversation_history.append({
                     "role": "assistant",
                     "content": answer,
@@ -229,7 +235,7 @@ if query := st.chat_input("輸入你的旅遊問題..."):
                     "trend_snapshot": dict(trend) # Optional: store trend snapshot per turn
                 })
 
-                # Display assistant message
+                # Display assistant message and metadata
                 st.markdown(answer)
                 st.caption(f"🧠 回覆情緒： {emotion_label}（信心值 {score:.3f}）")
                 st.caption(f"📌 引用資料來源：{', '.join(source_names)}")
@@ -249,6 +255,7 @@ if query := st.chat_input("輸入你的旅遊問題..."):
 with st.sidebar:
     st.header("情緒趨勢統計")
     if st.session_state.trend_counter:
-        st.bar_chart(st.session_state.trend_counter)
+        # Convert Counter to dictionary for st.bar_chart
+        st.bar_chart(dict(st.session_state.trend_counter))
     else:
         st.info("暫無情緒數據")
