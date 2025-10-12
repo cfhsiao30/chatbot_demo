@@ -237,8 +237,8 @@ if query := st.chat_input("輸入你的旅遊問題..."):
 
                 # Display assistant message and metadata
                 st.markdown(answer)
-                st.caption(f"🧠 回覆情緒： {emotion_label}（信心值 {score:.3f}）")
-                st.caption(f"📌 引用資料來源：{', '.join(source_names)}")
+              # st.caption(f"🧠 回覆情緒： {emotion_label}（信心值 {score:.3f}）")
+              # st.caption(f"📌 引用資料來源：{', '.join(source_names)}")
 
 
             except Exception as e:
