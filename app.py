@@ -198,11 +198,11 @@ for message in st.session_state.conversation_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         # Display emotion and source only for assistant messages
-        if message["role"] == "assistant":
-             if "emotion_label" in message:
-                  st.caption(f"🧠 回覆情緒： {message['emotion_label']}（信心值 {message['emotion_score']:.3f}）")
-             if "source" in message:
-                  st.caption(f"📌 引用資料來源：{', '.join(message['source'])}")
+        # if message["role"] == "assistant":
+        #      if "emotion_label" in message:
+        #           st.caption(f"🧠 回覆情緒： {message['emotion_label']}（信心值 {message['emotion_score']:.3f}）")
+        #      if "source" in message:
+        #           st.caption(f"📌 引用資料來源：{', '.join(message['source'])}")
 
 
 # Chat input
