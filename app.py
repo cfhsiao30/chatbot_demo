@@ -11,7 +11,7 @@ from google import genai
 # Set Streamlit page config
 st.set_page_config(layout="wide")
 
-st.write("#### "🌐 尼泊爾旅遊規劃夥伴")
+st.write("#### 🌐 尼泊爾旅遊規劃夥伴")
 
 # ============================================================
 # 1️⃣ 資料載入（模擬 RAG 資料庫）
