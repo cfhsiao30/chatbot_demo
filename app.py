@@ -252,10 +252,10 @@ if query := st.chat_input("輸入你的旅遊問題..."):
 
 
 # Optional: Display trend counter in a sidebar or expansion
-with st.sidebar:
-    st.header("情緒趨勢統計")
-    if st.session_state.trend_counter:
-        # Convert Counter to dictionary for st.bar_chart
-        st.bar_chart(dict(st.session_state.trend_counter))
-    else:
-        st.info("暫無情緒數據")
+# with st.sidebar:
+#     st.header("情緒趨勢統計")
+#     if st.session_state.trend_counter:
+#         # Convert Counter to dictionary for st.bar_chart
+#         st.bar_chart(dict(st.session_state.trend_counter))
+#     else:
+#         st.info("暫無情緒數據")
