@@ -6,3 +6,8 @@ pandas
 transformers
 torch
 numpy
+
+plotly
+SpeechRecognition
+gTTS
+
