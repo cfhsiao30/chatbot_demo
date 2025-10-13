@@ -1,3 +1,6 @@
+# ============================================================
+# 🌐 尼泊爾旅遊規劃夥伴 - 強化版（單一使用者導向）
+# ============================================================
 import streamlit as st
 import pandas as pd
 import faiss
@@ -8,9 +11,19 @@ from collections import Counter
 import os
 from google import genai
 
-# Set Streamlit page config
-st.set_page_config(layout="wide")
+from collections import Counter
+import plotly.graph_objects as go
 
+import speech_recognition as sr   # 🆕 語音輸入
+import threading                  # 用於非阻塞錄音
+from gtts import gTTS             # 🆕 語音輸出
+import tempfile                   # 🆕 暫存語音檔
+
+
+# ------------------------------------------------------------
+# 0️⃣ 基本設定
+# ------------------------------------------------------------
+st.set_page_config(layout="wide")
 st.write("#### 🌐 尼泊爾旅遊規劃夥伴")
 
 # ============================================================
@@ -74,11 +87,6 @@ df = load_data()
 # Use st.cache_resource to cache the model loading and index creation
 @st.cache_resource
 def build_faiss_index(dataframe):
-    embedder = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-    embeddings = embedder.encode(dataframe["combined_info"].tolist(), convert_to_numpy=True)
-    dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embeddings)
     return index, embedder
 
 index, embedder = build_faiss_index(df)
@@ -89,12 +97,6 @@ index, embedder = build_faiss_index(df)
 # Use st.cache_resource to cache the emotion analysis pipeline loading
 @st.cache_resource
 def load_emotion_analyzer():
-    emotion_analyzer = pipeline(
-        "sentiment-analysis",
-        model="nlptown/bert-base-multilingual-uncased-sentiment",
-        truncation=True,
-        max_length=512,
-    )
     return emotion_analyzer
 
 emotion_analyzer = load_emotion_analyzer()
@@ -194,11 +196,52 @@ def generate_answer(query, retrieved_docs, history):
     response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
     return response.text.strip()
 
-# ============================================================
-# 5️⃣ Streamlit 介面與對話管理
-# ============================================================
 
-# Initialize chat history and trend in session state
+# ============================================================
+# 5️ 即時語音輸入（非阻塞更新文字）
+# ============================================================
+def voice_input_realtime():
+    """即時語音輸入並更新到對話框"""
+    r = sr.Recognizer()
+    final_text = ""
+    placeholder = st.empty()  # 占位區塊，用於即時顯示文字
+
+    with sr.Microphone() as source:
+        st.info("🎤 開始語音輸入，說話中...")
+        r.adjust_for_ambient_noise(source)
+        try:
+            while True:
+                audio = r.listen(source, timeout=5, phrase_time_limit=3)
+                try:
+                    text = r.recognize_google(audio, language="zh-TW")
+                    final_text += text + " "
+                    placeholder.markdown(f"📝 {final_text}")  # 🆕 動態更新
+                except sr.UnknownValueError:
+                    pass
+        except KeyboardInterrupt:
+            st.success("🎯 語音輸入結束")
+    return final_text.strip()
+
+# ============================================================
+# 6️⃣ 語音播報功能（原樣保留）
+# ============================================================
+def speak_text(text):
+    tts = gTTS(text=text, lang='zh-TW')
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+        tts.save(tmp.name)
+        st.audio(tmp.name, format='audio/mp3')
+        return tmp.name
+
+# ============================================================
+# 7️⃣ 對話歷史顯示
+# ============================================================
+for message in st.session_state.get('conversation_history', []):
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# ============================================================
+# 8️⃣ 主對話輸入區（文字 + 語音按鈕）
+# ============================================================
 if 'conversation_history' not in st.session_state:
     st.session_state.conversation_history = []
 if 'emotion_log' not in st.session_state:
@@ -206,74 +249,81 @@ if 'emotion_log' not in st.session_state:
 if 'trend_counter' not in st.session_state:
     st.session_state.trend_counter = Counter()
 
-def log_trend(emotion_label):
-    st.session_state.emotion_log.append(emotion_label)
-    st.session_state.trend_counter = Counter(st.session_state.emotion_log)
-    return st.session_state.trend_counter
+col1, col2 = st.columns([3,1])
 
-# Display chat history
-for message in st.session_state.conversation_history:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        # Display emotion and source only for assistant messages
-        # if message["role"] == "assistant":
-        #      if "emotion_label" in message:
-        #           st.caption(f"🧠 回覆情緒： {message['emotion_label']}（信心值 {message['emotion_score']:.3f}）")
-        #      if "source" in message:
-        #           st.caption(f"📌 引用資料來源：{', '.join(message['source'])}")
+with col1:
+    query = st.chat_input("輸入你的旅遊問題...")
 
+with col2:
+    if st.button("🎤 語音輸入"):
+        # 🆕 使用線程避免阻塞介面
+        def record_voice():
+            voice_text = voice_input_realtime()
+            st.session_state.voice_text = voice_text
+        threading.Thread(target=record_voice).start()
 
-# Chat input
-if query := st.chat_input("輸入你的旅遊問題..."):
-    # Add user message to chat history
+# 使用語音輸入結果優先
+if hasattr(st.session_state, 'voice_text') and st.session_state.voice_text:
+    query = st.session_state.voice_text
+    del st.session_state.voice_text
+
+if query:
     st.session_state.conversation_history.append({"role": "user", "content": query, "query": query})
 
-    # Display user message
     with st.chat_message("user"):
         st.markdown(query)
 
-    # Process the query and generate response
     with st.chat_message("assistant"):
         with st.spinner("ChatBot 正在思考..."):
             try:
                 docs = retrieve(query)
                 answer = generate_answer(query, docs, st.session_state.conversation_history)
                 emotion_label, score = analyze_emotion(answer)
-                trend = log_trend(emotion_label) # Update trend counter
+                st.session_state.emotion_log.append(emotion_label)
+                trend = Counter(st.session_state.emotion_log)
                 source_names = docs['景點名稱_中文'].tolist()
 
-                # Add assistant message to chat history, including metadata for history
+                # 儲存對話紀錄
                 st.session_state.conversation_history.append({
                     "role": "assistant",
                     "content": answer,
-                    "answer": answer, # Store answer for history in generate_answer
+                    "answer": answer,
                     "emotion_label": emotion_label,
                     "emotion_score": score,
                     "source": source_names,
-                    "trend_snapshot": dict(trend) # Optional: store trend snapshot per turn
+                    "trend_snapshot": dict(trend)
                 })
 
-                # Display assistant message and metadata
-                st.markdown(answer)
-              # st.caption(f"🧠 回覆情緒： {emotion_label}（信心值 {score:.3f}）")
-              # st.caption(f"📌 引用資料來源：{', '.join(source_names)}")
+                # 🆕 卡片式呈現
+                with st.container():
+                    st.markdown("### 🎒 今日建議行程")
+                    st.markdown(answer)
+                    st.caption(f"🧠 回覆情緒： {emotion_label}（信心值 {score:.3f}）")
+                    st.caption(f"📍 引用景點：{', '.join(source_names)}")
 
+                # 🆕 語音播放
+                with st.expander("🔊 聆聽旅伴回覆"):
+                    speak_text(answer)
 
             except Exception as e:
                 st.error(f"ChatBot 發生錯誤：{e}")
-                # Log error in history if needed
                 st.session_state.conversation_history.append({
                     "role": "assistant",
                     "content": f"ChatBot 發生錯誤：{e}",
                     "error": str(e)
                 })
 
-
-# Optional: Display trend counter in a sidebar or expansion
-# with st.sidebar:
-#     st.header("情緒趨勢統計")
-#     if st.session_state.trend_counter:
-#         # Convert Counter to dictionary for st.bar_chart
-#         st.bar_chart(dict(st.session_state.trend_counter))
-#     else:
-#         st.info("暫無情緒數據")
+# ============================================================
+# 9️⃣ 側邊欄：情緒雷達圖
+# ============================================================
+with st.sidebar:
+    st.header("💬 我的情緒旅程紀錄")
+    labels = list(Counter(st.session_state.emotion_log).keys())
+    values = list(Counter(st.session_state.emotion_log).values())
+    if labels:
+        fig = go.Figure()
+        fig.add_trace(go.Scatterpolar(r=values, theta=labels, fill='toself', name='情緒分布'))
+        fig.update_layout(polar=dict(radialaxis=dict(visible=True)), showlegend=False, title="🧭 你的情緒雷達圖")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("暫無情緒數據")
