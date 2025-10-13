@@ -107,7 +107,7 @@ def analyze_emotion(text):
 # ============================================================
 # 4️⃣ 定義 RAG 檢索與回答生成
 # ============================================================
-def retrieve(query, top_k=2):
+def retrieve(query, top_k=5):
     """用 FAISS 搜尋最相關的景點資料"""
     query_vector = embedder.encode([query], convert_to_numpy=True)
     D, I = index.search(query_vector, top_k)
