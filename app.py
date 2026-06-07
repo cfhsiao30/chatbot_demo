@@ -300,36 +300,29 @@ def show_spot_card(spot: dict):
     name = spot['name']
     source, img = load_spot_image(name)
 
-    if img:
-        src = _img_src(source, img)
-        attribution = '<p style="font-size:11px;color:#aaa;margin:2px 0 0 0;">© Wikimedia Commons CC BY-SA</p>' if source == 'wikimedia' else ''
-        img_html = f"""
-            <div style="flex-shrink:0; width:180px; height:180px; overflow:hidden; border-radius:8px;">
-                <img src="{src}" style="width:100%; height:100%; object-fit:cover; display:block;">
-            </div>
-            {attribution}"""
-    else:
-        img_html = """
-            <div style="flex-shrink:0; width:180px; height:180px; background:#D4CFC7;
-                        border-radius:8px; display:flex; align-items:center;
-                        justify-content:center; color:#6B6B6B; font-size:13px;">
-                📷 示意圖
-            </div>"""
+    # 外框：米白底 + 左邊綠線
+    with st.container():
+        st.markdown('<div style="background:#F5F0E8;border-left:4px solid #5B8A5B;border-radius:10px;padding:12px;margin-bottom:12px;">', unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div style="display:flex; gap:16px; background:#F5F0E8; border-radius:10px;
-                border-left:4px solid #5B8A5B; padding:14px; margin-bottom:14px;">
-        <div style="display:flex; flex-direction:column;">
-            {img_html}
-        </div>
-        <div style="flex:1; display:flex; flex-direction:column; justify-content:center;">
-            <p style="margin:0 0 10px 0; font-weight:bold; color:#3D5A3D; font-size:16px;">📍 {name}</p>
-            <p style="margin:4px 0; color:#555; font-size:14px;">⏱️ {spot['duration']}</p>
-            <p style="margin:4px 0; color:#555; font-size:14px;">🍽️ {spot['food']}</p>
-            <p style="margin:4px 0; color:#E07B39; font-size:14px;">💡 {spot['tip']}</p>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        img_col, info_col = st.columns([1, 1.8])
+
+        with img_col:
+            if img:
+                src = _img_src(source, img)
+                # padding-top:100% 技巧讓圖片強制正方形
+                st.markdown(f'<div style="position:relative;width:100%;padding-top:100%;overflow:hidden;border-radius:8px;"><img src="{src}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;"></div>', unsafe_allow_html=True)
+                if source == 'wikimedia':
+                    st.caption("© Wikimedia Commons CC BY-SA")
+            else:
+                st.markdown('<div style="position:relative;width:100%;padding-top:100%;background:#D4CFC7;border-radius:8px;"><span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#6B6B6B;font-size:13px;">📷 示意圖</span></div>', unsafe_allow_html=True)
+
+        with info_col:
+            st.markdown(f"**📍 {name}**")
+            st.markdown(f"⏱️ {spot['duration']}")
+            st.markdown(f"🍽️ {spot['food']}")
+            st.markdown(f'<p style="color:#E07B39;margin:0;">💡 {spot["tip"]}</p>', unsafe_allow_html=True)
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def show_itinerary_cards(itinerary_data: dict):
