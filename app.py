@@ -542,6 +542,46 @@ def show_map(itinerary_data: dict):
 
 
 # ============================================================
+# 行程觸發：關鍵字偵測 + 參數萃取
+# ============================================================
+_ITINERARY_KEYWORDS = [
+    "規劃行程", "生成行程", "安排行程", "幫我排", "行程規劃",
+    "幫我規劃", "幫我安排", "排行程", "出行程", "做行程", "產生行程", "規劃一下",
+]
+
+def wants_itinerary(query: str) -> bool:
+    return any(kw in query for kw in _ITINERARY_KEYWORDS)
+
+
+def extract_trip_params(history: list) -> dict:
+    recent = [h for h in history[-12:] if h.get("content")]
+    lines = "\n".join(
+        f"{'使用者' if h['role'] == 'user' else '助理'}：{h['content'][:150]}"
+        for h in recent
+    )
+    prompt = f"""從以下旅遊對話中，提取旅客的旅遊偏好，回傳 JSON（欄位找不到資訊時填 null）：
+
+對話：
+{lines}
+
+回傳格式（純 JSON，不可包含其他文字）：
+{{
+  "trip_type": "冒險健行 或 文化宗教 或 自然生態 或 null",
+  "companion": "個人獨旅 或 情侶同遊 或 親子同遊 或 長輩同行 或 null",
+  "travel_month": "X月 格式（如 10月）或 null"
+}}"""
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        return json.loads(response.text)
+    except Exception:
+        return {}
+
+
+# ============================================================
 # 9️⃣ Session state 初始化
 # ============================================================
 if 'conversation_history' not in st.session_state:
@@ -552,65 +592,36 @@ if 'trend_counter' not in st.session_state:
     st.session_state.trend_counter = Counter()
 if 'itinerary' not in st.session_state:
     st.session_state.itinerary = None
+if 'show_confirmation' not in st.session_state:
+    st.session_state.show_confirmation = False
+if 'extracted_params' not in st.session_state:
+    st.session_state.extracted_params = {}
+if 'itinerary_month_num' not in st.session_state:
+    st.session_state.itinerary_month_num = 0
 
 # ============================================================
 # 🔟 側欄
 # ============================================================
 with st.sidebar:
-    st.markdown("### 🌐 旅遊偏好")
-    trip_type = st.selectbox(
-        "選擇您偏好的旅遊類型",
-        ["冒險健行", "文化宗教", "自然生態"],
-    )
-    companion = st.selectbox(
-        "旅伴類型",
-        ["個人獨旅", "情侶同遊", "親子同遊", "長輩同行"],
-    )
-    travel_month = st.selectbox(
-        "出發月份",
-        [f"{i}月" for i in range(1, 13)],
-    )
-    travel_month_num = int(travel_month.replace("月", ""))
-
-
-    must_visit = st.multiselect(
-        "景點選填",
-        df['景點名稱_中文'].tolist(),
-    )
-
     st.markdown("### 📅 規劃進度")
-    total_days = st.number_input("請輸入行程總天數", min_value=1, max_value=14, value=3, step=1)
-
     planned = len(st.session_state.itinerary['days']) if st.session_state.itinerary else 0
-    st.write(f"已規劃 {planned} / {int(total_days)} 天")
-    st.progress(min(planned / int(total_days), 1.0) if total_days > 0 else 0)
-
-    st.markdown("### 🗺️ 參考行程")
-    if st.button("生成建議行程", use_container_width=True, type="primary"):
-        with st.spinner("AI 正在規劃行程..."):
-            try:
-                result = generate_itinerary(
-                    trip_type, total_days, travel_month, companion,
-                    st.session_state.conversation_history,
-                    must_visit,
-                )
-                st.session_state.itinerary = result
-                st.rerun()
-            except Exception as e:
-                st.error(f"行程生成失敗：{e}")
+    st.write(f"已規劃 {planned} 天行程")
 
     if st.button("🔄 清空重來", use_container_width=True):
         st.session_state.itinerary = None
         st.session_state.conversation_history = []
         st.session_state.emotion_log = []
         st.session_state.trend_counter = Counter()
+        st.session_state.show_confirmation = False
+        st.session_state.extracted_params = {}
+        st.session_state.itinerary_month_num = 0
         st.rerun()
 
 # ============================================================
 # 主畫面：行程卡片 → 地圖 → 聊天
 # ============================================================
 if st.session_state.itinerary:
-    show_itinerary_cards(st.session_state.itinerary, travel_month_num)
+    show_itinerary_cards(st.session_state.itinerary, st.session_state.itinerary_month_num)
     show_map(st.session_state.itinerary)
     st.markdown("---")
 
@@ -620,6 +631,50 @@ for message in st.session_state.conversation_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# ── 確認卡片：AI 偵測到規劃意圖後出現 ──────────────────────────
+if st.session_state.show_confirmation:
+    params = st.session_state.extracted_params
+    companion_label  = params.get('companion')  or '未指定'
+    trip_type_label  = params.get('trip_type')  or '綜合推薦'
+    month_label      = params.get('travel_month') or '未指定'
+
+    with st.container(border=True):
+        st.markdown("### 🗺️ 我已掌握您的旅程輪廓！")
+        st.markdown(f"**{companion_label}・{trip_type_label}・{month_label}出發**")
+        st.caption("天數與景點確認後，即可生成您的專屬行程。")
+
+        confirm_days = st.number_input(
+            "行程天數", min_value=1, max_value=14, value=3, step=1, key="confirm_days"
+        )
+        confirm_must = st.multiselect(
+            "指定景點（選填）", df['景點名稱_中文'].tolist(), key="confirm_must"
+        )
+
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            if st.button("✨ 為我生成專屬行程", type="primary", use_container_width=True):
+                final_trip_type = params.get('trip_type') or '文化宗教'
+                final_companion  = params.get('companion')  or '個人獨旅'
+                final_month      = params.get('travel_month') or ''
+                month_num = int(final_month.replace("月", "")) if final_month and '月' in final_month else 0
+                with st.spinner("✈️ 旅伴正在為您打包行程…"):
+                    try:
+                        result = generate_itinerary(
+                            final_trip_type, int(confirm_days), final_month, final_companion,
+                            st.session_state.conversation_history,
+                            confirm_must,
+                        )
+                        st.session_state.itinerary = result
+                        st.session_state.itinerary_month_num = month_num
+                        st.session_state.show_confirmation = False
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"行程生成失敗：{e}")
+        with col2:
+            if st.button("繼續聊聊", use_container_width=True):
+                st.session_state.show_confirmation = False
+                st.rerun()
+
 
 def log_trend(emotion_label):
     st.session_state.emotion_log.append(emotion_label)
@@ -627,7 +682,10 @@ def log_trend(emotion_label):
     return st.session_state.trend_counter
 
 
-if query := st.chat_input("輸入你的旅遊問題..."):
+if query := st.chat_input("詢問旅遊建議，或說「幫我規劃行程」…"):
+    if not wants_itinerary(query):
+        st.session_state.show_confirmation = False
+
     st.session_state.conversation_history.append({
         "role": "user", "content": query, "query": query
     })
@@ -663,3 +721,9 @@ if query := st.chat_input("輸入你的旅遊問題..."):
                     "content": f"ChatBot 發生錯誤：{e}",
                     "error": str(e),
                 })
+
+    if wants_itinerary(query):
+        params = extract_trip_params(st.session_state.conversation_history)
+        st.session_state.extracted_params = params
+        st.session_state.show_confirmation = True
+        st.rerun()
