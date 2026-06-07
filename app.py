@@ -570,7 +570,7 @@ with st.sidebar:
 
     st.markdown("### 🗺️ 參考行程")
     if st.button("生成建議行程", use_container_width=True, type="primary"):
-        with st.spinner("AI 正在規劃行程..."):
+        with st.spinner("規劃中..."):
             try:
                 result = generate_itinerary(
                     trip_type, total_days, travel_month, companion,
