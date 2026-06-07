@@ -532,7 +532,7 @@ with st.sidebar:
 
 
     must_visit = st.multiselect(
-        "指定景點",
+        "景點選填",
         df['景點名稱_中文'].tolist(),
     )
 
