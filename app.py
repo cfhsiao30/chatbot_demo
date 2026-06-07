@@ -8,6 +8,7 @@ from collections import Counter
 import os
 import json
 import re
+import requests
 from pathlib import Path
 from google import genai
 from google.genai import types
@@ -48,7 +49,7 @@ div[data-testid="stProgressBar"] > div > div > div {
 
 st.title("🏔️ 尼泊爾旅遊設計師")
 st.caption("打造專屬你的夢幻尼泊爾之旅")
-st.info("🎒 旅途準備好了嗎？AI旅伴已打包好地圖與好心情。")
+st.info("🎒 旅途準備好了嗎？AI旅伴已打包好地圖與好心情。\n\n您可以試著先跟旅伴聊聊，讓旅伴對你的認識多一點，旅伴會儘量為您規劃最量身訂製的行程。")
 
 # ============================================================
 # 1️⃣ 資料載入
@@ -134,9 +135,23 @@ if not API_KEY:
 client = genai.Client(api_key=API_KEY)
 
 # ============================================================
-# 4️⃣ 景點圖片（Wikimedia Commons，CC BY-SA 授權）
+# 4️⃣ 景點圖片
+# 優先順序：① 本地 images/（開發者覆蓋） ② Wikipedia API ③ Wikimedia 備援
 # ============================================================
-# 本地 images/ 資料夾優先；找不到時使用以下 Wikimedia 備援圖
+# Wikipedia 英文文章標題對照（用於自動抓取縮圖）
+WIKIPEDIA_TITLES = {
+    "斯瓦揚布佛塔":      "Swayambhunath",
+    "安娜普納基地營":     "Annapurna_Base_Camp",
+    "巴迪亞國家公園":     "Bardiya_National_Park",
+    "巴克塔普爾杜巴廣場": "Bhaktapur_Durbar_Square",
+    "奇特旺國家公園":     "Chitwan_National_Park",
+    "聖母峰基地營健行":   "Everest_Base_Camp_trek",
+    "朗塘國家公園":       "Langtang_National_Park",
+    "藍毗尼":             "Lumbini",
+    "帕舒帕提那寺":       "Pashupatinath_Temple",
+    "博卡拉":             "Pokhara",
+}
+
 WIKIMEDIA_IMAGES = {
     "博卡拉":           "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Pokhara_Valley.jpg/330px-Pokhara_Valley.jpg",
     "斯瓦揚布佛塔":     "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fe/Swayambhunath_2018.jpg/330px-Swayambhunath_2018.jpg",
@@ -347,7 +362,7 @@ def _img_src(source: str, img: str) -> str:
     return img
 
 
-def show_spot_card(spot: dict, travel_month_num: int = 0):
+def _spot_card_html(spot: dict, travel_month_num: int = 0) -> str:
     name = spot['name']
     source, img = load_spot_image(name)
 
@@ -357,55 +372,51 @@ def show_spot_card(spot: dict, travel_month_num: int = 0):
         if not match.empty:
             season_warning = not is_best_season(match.iloc[0]['最佳造訪季節'], travel_month_num)
 
-    img_col, info_col = st.columns([1, 2.5])
-
-    with img_col:
-        if img:
-            src = _img_src(source, img)
-            st.markdown(
-                f'<div style="position:relative;width:100%;padding-top:100%;overflow:hidden;'
-                f'border-radius:8px;"><img src="{src}" style="position:absolute;top:0;left:0;'
-                f'width:100%;height:100%;object-fit:cover;"></div>',
-                unsafe_allow_html=True
-            )
-            if source == 'wikimedia':
-                st.caption("© Wikimedia Commons CC BY-SA")
-        else:
-            st.markdown(
-                f'<div style="position:relative;width:100%;padding-top:100%;background:#D4CFC7;'
-                f'border-radius:8px;"><div style="position:absolute;top:0;left:0;width:100%;height:100%;'
-                f'display:flex;flex-direction:column;align-items:center;justify-content:center;'
-                f'color:#6B6B6B;font-size:12px;text-align:center;padding:8px;box-sizing:border-box;">'
-                f'📷<br>{name}</div></div>',
-                unsafe_allow_html=True
-            )
-
-    with info_col:
-        warning_html = (
-            '<p style="margin:6px 0 0 0;color:#92650a;font-size:13px;background:#fff3cd;'
-            'padding:4px 8px;border-radius:4px;display:inline-block;">⚠️ 非最佳造訪季節，請評估天氣狀況</p>'
-        ) if season_warning else ""
-        st.markdown(
-            f'<div style="background:#F5F0E8;border-left:4px solid #5B8A5B;border-radius:10px;'
-            f'padding:14px 16px;height:100%;">'
-            f'<p style="margin:0 0 8px 0;font-weight:bold;color:#3D5A3D;font-size:16px;">📍 {name}</p>'
-            f'<p style="margin:4px 0;color:#555;font-size:14px;">⏱️ {spot["duration"]}</p>'
-            f'<p style="margin:4px 0;color:#555;font-size:14px;">🍽️ {spot["food"]}</p>'
-            f'<p style="margin:4px 0;color:#E07B39;font-size:14px;">💡 {spot["tip"]}</p>'
-            f'{warning_html}'
-            f'</div>',
-            unsafe_allow_html=True
+    if img:
+        src = _img_src(source, img)
+        credit = '<p style="font-size:10px;color:#999;margin:2px 4px 0;">© Wikimedia Commons CC BY-SA</p>' if source == 'wikimedia' else ''
+        img_html = (
+            f'<img src="{src}" style="width:100%;height:150px;object-fit:cover;'
+            f'border-radius:10px 10px 0 0;display:block;">{credit}'
+        )
+    else:
+        img_html = (
+            f'<div style="width:100%;height:150px;background:#D4CFC7;border-radius:10px 10px 0 0;'
+            f'display:flex;flex-direction:column;align-items:center;justify-content:center;'
+            f'color:#6B6B6B;font-size:12px;">📷<br>{name}</div>'
         )
 
-    st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
+    warning_html = (
+        '<p style="margin:6px 0 0 0;color:#92650a;font-size:11px;background:#fff3cd;'
+        'padding:3px 6px;border-radius:4px;display:inline-block;">⚠️ 非最佳造訪季節</p>'
+    ) if season_warning else ''
+
+    return (
+        f'<div style="min-width:210px;max-width:210px;background:#F5F0E8;'
+        f'border-radius:10px;border:1px solid #d8d0c4;flex-shrink:0;overflow:hidden;">'
+        f'{img_html}'
+        f'<div style="padding:10px 12px;">'
+        f'<p style="margin:0 0 6px 0;font-weight:bold;color:#3D5A3D;font-size:14px;">📍 {name}</p>'
+        f'<p style="margin:3px 0;color:#555;font-size:12px;">⏱️ {spot["duration"]}</p>'
+        f'<p style="margin:3px 0;color:#555;font-size:12px;">🍽️ {spot["food"]}</p>'
+        f'<p style="margin:3px 0;color:#E07B39;font-size:12px;">💡 {spot["tip"]}</p>'
+        f'{warning_html}'
+        f'</div>'
+        f'</div>'
+    )
 
 
 def show_itinerary_cards(itinerary_data: dict, travel_month_num: int = 0):
     for day_data in itinerary_data['days']:
         day_num = day_data['day']
         st.markdown(f"### 📅 第 {day_num} 天行程")
-        for spot in day_data['spots']:
-            show_spot_card(spot, travel_month_num)
+        cards_html = "".join(_spot_card_html(spot, travel_month_num) for spot in day_data['spots'])
+        st.markdown(
+            f'<div style="display:flex;overflow-x:auto;gap:16px;padding:4px 2px 16px 2px;">'
+            f'{cards_html}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
 
 # ============================================================
