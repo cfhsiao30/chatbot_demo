@@ -398,7 +398,7 @@ if 'itinerary' not in st.session_state:
 # ============================================================
 with st.sidebar:
     st.markdown("### 🧭 旅遊偏好")
-    trip_type = st.radio(
+    trip_type = st.selectbox(
         "選擇您偏好的旅遊類型",
         ["冒險健行", "文化宗教", "自然生態"],
     )
