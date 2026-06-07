@@ -38,8 +38,8 @@ WHITE      = "#FFFFFF"
 
 st.markdown(f"""
 <style>
-[data-testid="stAppViewContainer"] {{ background-color: {BG}; }}
-[data-testid="stSidebar"] {{ background-color: {SIDEBAR_BG}; }}
+[data-testid="stAppViewContainer"] {{ background-color: #FFFFFF; }}
+[data-testid="stSidebar"] {{ background-color: #FFFFFF; }}
 [data-testid="stSidebar"] .stMarkdown h3 {{ color: {TITLE}; }}
 
 /* ── Day card ── */
