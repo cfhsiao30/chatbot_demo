@@ -530,9 +530,9 @@ with st.sidebar:
     )
     travel_month_num = int(travel_month.replace("月", ""))
 
-    st.markdown("### 📍 指定景點")
+
     must_visit = st.multiselect(
-        "指定景點，搭配下拉選單",
+        "指定景點",
         df['景點名稱_中文'].tolist(),
     )
 
