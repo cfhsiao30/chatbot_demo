@@ -39,6 +39,10 @@ st.markdown("""
     border-radius: 8px;
     border-left: 4px solid #5B8A5B;
 }
+/* Fix 5：進度條改綠色 */
+div[data-testid="stProgressBar"] > div > div > div {
+    background-color: #5B8A5B !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -174,21 +178,27 @@ def generate_itinerary(trip_type: str, total_days: int) -> dict:
     ])
     priority_str = "、".join(priority_spots)
 
+    valid_names = [row['景點名稱_中文'] for _, row in df.iterrows()]
+    valid_names_str = "、".join(valid_names)
+
     prompt = f"""你是尼泊爾旅遊專家。請為偏好「{trip_type}」的旅客規劃 {total_days} 天行程。
 
-優先景點（請優先從以下選擇，景點名稱必須完全一致）：{priority_str}
+【絕對限制】景點的 name 欄位只能使用以下清單中的名稱，必須完全一致，禁止自行新增、縮寫或創造任何其他景點：
+{valid_names_str}
 
-所有可選景點：
+優先選擇（符合 {trip_type} 類型）：{priority_str}
+
+各景點資訊：
 {all_spots_info}
 
-請只回傳純 JSON，不要任何說明文字或 markdown 標記：
+每天安排 2–3 個景點。回傳格式（純 JSON）：
 {{
   "days": [
     {{
       "day": 1,
       "spots": [
         {{
-          "name": "景點中文名稱",
+          "name": "景點名稱（必須完全符合上方清單）",
           "duration": "建議停留時間",
           "food": "餐食建議（一句話）",
           "tip": "小提醒（一句話）"
@@ -196,9 +206,7 @@ def generate_itinerary(trip_type: str, total_days: int) -> dict:
       ]
     }}
   ]
-}}
-
-每天安排 2–3 個景點，依旅客偏好選擇最合適的景點。"""
+}}"""
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -300,29 +308,42 @@ def show_spot_card(spot: dict):
     name = spot['name']
     source, img = load_spot_image(name)
 
-    # 外框：米白底 + 左邊綠線
-    with st.container():
-        st.markdown('<div style="background:#F5F0E8;border-left:4px solid #5B8A5B;border-radius:10px;padding:12px;margin-bottom:12px;">', unsafe_allow_html=True)
+    img_col, info_col = st.columns([1, 2.5])
 
-        img_col, info_col = st.columns([1, 1.8])
+    with img_col:
+        if img:
+            src = _img_src(source, img)
+            st.markdown(
+                f'<div style="position:relative;width:100%;padding-top:100%;overflow:hidden;'
+                f'border-radius:8px;"><img src="{src}" style="position:absolute;top:0;left:0;'
+                f'width:100%;height:100%;object-fit:cover;"></div>',
+                unsafe_allow_html=True
+            )
+            if source == 'wikimedia':
+                st.caption("© Wikimedia Commons CC BY-SA")
+        else:
+            st.markdown(
+                f'<div style="position:relative;width:100%;padding-top:100%;background:#D4CFC7;'
+                f'border-radius:8px;"><div style="position:absolute;top:0;left:0;width:100%;height:100%;'
+                f'display:flex;flex-direction:column;align-items:center;justify-content:center;'
+                f'color:#6B6B6B;font-size:12px;text-align:center;padding:8px;box-sizing:border-box;">'
+                f'📷<br>{name}</div></div>',
+                unsafe_allow_html=True
+            )
 
-        with img_col:
-            if img:
-                src = _img_src(source, img)
-                # padding-top:100% 技巧讓圖片強制正方形
-                st.markdown(f'<div style="position:relative;width:100%;padding-top:100%;overflow:hidden;border-radius:8px;"><img src="{src}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;"></div>', unsafe_allow_html=True)
-                if source == 'wikimedia':
-                    st.caption("© Wikimedia Commons CC BY-SA")
-            else:
-                st.markdown('<div style="position:relative;width:100%;padding-top:100%;background:#D4CFC7;border-radius:8px;"><span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#6B6B6B;font-size:13px;">📷 示意圖</span></div>', unsafe_allow_html=True)
+    with info_col:
+        st.markdown(
+            f'<div style="background:#F5F0E8;border-left:4px solid #5B8A5B;border-radius:10px;'
+            f'padding:14px 16px;height:100%;">'
+            f'<p style="margin:0 0 8px 0;font-weight:bold;color:#3D5A3D;font-size:16px;">📍 {name}</p>'
+            f'<p style="margin:4px 0;color:#555;font-size:14px;">⏱️ {spot["duration"]}</p>'
+            f'<p style="margin:4px 0;color:#555;font-size:14px;">🍽️ {spot["food"]}</p>'
+            f'<p style="margin:4px 0;color:#E07B39;font-size:14px;">💡 {spot["tip"]}</p>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
-        with info_col:
-            st.markdown(f"**📍 {name}**")
-            st.markdown(f"⏱️ {spot['duration']}")
-            st.markdown(f"🍽️ {spot['food']}")
-            st.markdown(f'<p style="color:#E07B39;margin:0;">💡 {spot["tip"]}</p>', unsafe_allow_html=True)
-
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
 
 
 def show_itinerary_cards(itinerary_data: dict):
@@ -404,8 +425,8 @@ with st.sidebar:
     total_days = st.number_input("請輸入行程總天數", min_value=1, max_value=14, value=3, step=1)
 
     planned = len(st.session_state.itinerary['days']) if st.session_state.itinerary else 0
-    st.write(f"已完成 {planned}/{total_days} 天")
-    st.progress(min(planned / total_days, 1.0) if total_days > 0 else 0)
+    st.write(f"已規劃 {planned} / {int(total_days)} 天")
+    st.progress(min(planned / int(total_days), 1.0) if total_days > 0 else 0)
 
     st.markdown("### 🗺️ 參考行程")
     if st.button("生成建議行程", use_container_width=True, type="primary"):
