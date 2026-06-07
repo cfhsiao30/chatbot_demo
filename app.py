@@ -166,36 +166,58 @@ WIKIMEDIA_IMAGES = {
 }
 
 @st.cache_data(show_spinner=False)
-def fetch_wiki_thumbnail(chinese_name: str) -> str | None:
-    """從 Wikipedia API 取得景點縮圖 URL，結果快取避免重複請求。"""
-    title = WIKIPEDIA_TITLES.get(chinese_name)
-    if not title:
-        return None
-    try:
-        url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}"
-        r = requests.get(url, timeout=6, headers={"User-Agent": "NepalTravelApp/1.0"})
-        if r.status_code == 200:
-            return r.json().get("thumbnail", {}).get("source")
-    except Exception:
-        pass
+def fetch_commons_image(search_query: str, fallback_parent: str = "") -> str | None:
+    """以 search_query 精準搜尋 Wikimedia Commons 圖片。
+    找不到時以 fallback_parent 英文名再試一次。"""
+    for query in dict.fromkeys([search_query, WIKIPEDIA_TITLES.get(fallback_parent, "")]):
+        if not query:
+            continue
+        try:
+            params = {
+                "action": "query",
+                "generator": "search",
+                "gsrnamespace": "6",
+                "gsrsearch": query,
+                "gsrlimit": "5",
+                "prop": "imageinfo",
+                "iiprop": "url",
+                "iiurlwidth": "400",
+                "format": "json",
+                "origin": "*",
+            }
+            r = requests.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params=params,
+                timeout=8,
+                headers={"User-Agent": "NepalTravelApp/1.0"},
+            )
+            if r.status_code == 200:
+                pages = r.json().get("query", {}).get("pages", {})
+                for page in sorted(pages.values(), key=lambda p: p.get("index", 0)):
+                    info = page.get("imageinfo", [{}])[0]
+                    url = info.get("thumburl") or info.get("url", "")
+                    if url and not url.lower().endswith(".svg"):
+                        return url
+        except Exception:
+            continue
     return None
 
 
-def load_spot_image(name: str):
+def load_spot_image(search_query: str = "", parent: str = ""):
     """圖片來源優先順序：
-    ① Wikipedia API（自動抓取，對應 WIKIPEDIA_TITLES）
+    ① Wikimedia Commons（以 search_query 精準搜）
     ② 本地 images/（開發者覆蓋：放同名圖片即可替換）
     ③ Wikimedia 硬編碼備援
     回傳 (來源, 路徑或URL)，來源為 'web' / 'local' / 'wikimedia'。"""
-    wiki_url = fetch_wiki_thumbnail(name)
-    if wiki_url:
-        return 'web', wiki_url
+    commons_url = fetch_commons_image(search_query, parent)
+    if commons_url:
+        return 'web', commons_url
     for ext in ['.jpg', '.jpeg', '.png', '.webp']:
-        path = Path(f"images/{name}{ext}")
+        path = Path(f"images/{parent}{ext}")
         if path.exists():
             return 'local', str(path)
-    if name in WIKIMEDIA_IMAGES:
-        return 'wikimedia', WIKIMEDIA_IMAGES[name]
+    if parent in WIKIMEDIA_IMAGES:
+        return 'wikimedia', WIKIMEDIA_IMAGES[parent]
     return None, None
 
 
@@ -276,8 +298,9 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
 
 【欄位規則】
 - name：具體活動或體驗名稱，可自由描述（例：「犀牛河獨木舟觀鳥」、「斯瓦揚布佛塔日出參拜」）
-- parent：必須從以下清單選一個最相關的景點名稱（用於圖片對應，必須完全一致）：
+- parent：必須從以下清單選一個最相關的景點名稱（用於資料對應，必須完全一致）：
   {valid_names_str}
+- search_query：2–4 個英文關鍵字，用於搜尋此活動的代表圖片（例："Phewa Lake kayak Nepal"、"Sarangkot sunrise Himalayas"、"Davis Falls Pokhara"）
 
 各景點參考資訊：
 {all_spots_info}
@@ -291,6 +314,7 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
         {{
           "name": "具體活動名稱",
           "parent": "對應景點（必須符合上方清單）",
+          "search_query": "English keywords for image search",
           "duration": "建議停留時間",
           "food": "餐食建議（一句話）",
           "tip": "小提醒（一句話）"
@@ -399,7 +423,8 @@ def _img_src(source: str, img: str) -> str:
 def _spot_card_html(spot: dict, travel_month_num: int = 0) -> str:
     name = spot['name']
     parent = spot.get('parent', name)
-    source, img = load_spot_image(parent)
+    search_query = spot.get('search_query', name)
+    source, img = load_spot_image(search_query, parent)
 
     season_warning = False
     if travel_month_num:
