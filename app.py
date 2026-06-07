@@ -183,17 +183,17 @@ def fetch_wiki_thumbnail(chinese_name: str) -> str | None:
 
 def load_spot_image(name: str):
     """圖片來源優先順序：
-    ① 本地 images/（開發者覆蓋，放同名圖片即生效）
-    ② Wikipedia API（自動抓取，對應 WIKIPEDIA_TITLES）
+    ① Wikipedia API（自動抓取，對應 WIKIPEDIA_TITLES）
+    ② 本地 images/（開發者覆蓋：放同名圖片即可替換）
     ③ Wikimedia 硬編碼備援
-    回傳 (來源, 路徑或URL)，來源為 'local' / 'web' / 'wikimedia'。"""
+    回傳 (來源, 路徑或URL)，來源為 'web' / 'local' / 'wikimedia'。"""
+    wiki_url = fetch_wiki_thumbnail(name)
+    if wiki_url:
+        return 'web', wiki_url
     for ext in ['.jpg', '.jpeg', '.png', '.webp']:
         path = Path(f"images/{name}{ext}")
         if path.exists():
             return 'local', str(path)
-    wiki_url = fetch_wiki_thumbnail(name)
-    if wiki_url:
-        return 'web', wiki_url
     if name in WIKIMEDIA_IMAGES:
         return 'wikimedia', WIKIMEDIA_IMAGES[name]
     return None, None
@@ -238,9 +238,9 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
     month_hint = f"出發月份：{travel_month}，請優先安排當月屬於最佳造訪季節的景點。" if travel_month else ""
 
     companion_guide = {
-        "親子": "請避免高強度健行景點（如聖母峰基地營），優先安排適合兒童的景點。",
+        "親子同遊": "請避免高強度健行景點（如聖母峰基地營），優先安排適合兒童的景點。",
         "長輩同行": "請避免高海拔、高強度景點，優先安排交通方便、步行量少的景點。",
-        "情侶": "可優先安排景色優美、氣氛浪漫的景點。",
+        "情侶同遊": "可優先安排景色優美、氣氛浪漫的景點。",
     }.get(companion, "")
 
     chat_hint = ""
@@ -254,8 +254,8 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
             chat_hint = f"對話中旅人提到的偏好（請參考）：\n{lines}"
 
     must_hint = ""
-    if must_visit:
-        must_hint = f"【必訪景點】旅客明確指定以下景點，行程中必須全部安排，不得省略：{'、'.join(must_visit)}\n"
+    if must_visit and must_visit.strip():
+        must_hint = f"【旅客指定需求】{must_visit.strip()}\n請務必將此需求反映在行程規劃中。\n"
 
     prompt = f"""你是尼泊爾旅遊專家。請為旅客規劃 {total_days} 天行程。
 
@@ -522,7 +522,7 @@ with st.sidebar:
     )
     companion = st.selectbox(
         "旅伴類型",
-        ["獨旅", "情侶", "親子", "長輩同行"],
+        ["個人獨旅", "情侶同遊", "親子同遊", "長輩同行"],
     )
     travel_month = st.selectbox(
         "出發月份",
@@ -531,9 +531,9 @@ with st.sidebar:
     travel_month_num = int(travel_month.replace("月", ""))
 
     st.markdown("### 📍 指定景點")
-    must_visit = st.multiselect(
-        "想去哪些地方？（可複選，不選由 AI 決定）",
-        df['景點名稱_中文'].tolist(),
+    must_visit = st.text_input(
+        "想去哪些地方？（自由填寫或由旅伴推薦）",
+        placeholder="例：想看犀牛、想體驗叢林健行、一定要去博卡拉...",
     )
 
     st.markdown("### 📅 規劃進度")
