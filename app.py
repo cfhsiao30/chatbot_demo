@@ -161,6 +161,23 @@ def load_spot_image(name: str):
         return 'wikimedia', WIKIMEDIA_IMAGES[name]
     return None, None
 
+
+def is_best_season(season_str: str, month_num: int) -> bool:
+    """回傳 True 代表 month_num 落在最佳造訪季節內。"""
+    ranges = re.findall(r'(\d+)[–\-](\d+)\s*月', season_str)
+    good_months: set = set()
+    for start, end in ranges:
+        s, e = int(start), int(end)
+        if s <= e:
+            good_months.update(range(s, e + 1))
+        else:
+            good_months.update(range(s, 13))
+            good_months.update(range(1, e + 1))
+    if not good_months:
+        return True
+    return month_num in good_months
+
+
 # ============================================================
 # 5️⃣ 行程生成（Gemini）
 # ============================================================
@@ -170,10 +187,10 @@ TRIP_TYPE_MAP = {
     "自然生態": ["博卡拉", "奇特旺國家公園", "巴迪亞國家公園"],
 }
 
-def generate_itinerary(trip_type: str, total_days: int) -> dict:
+def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", companion: str = "", history: list = None) -> dict:
     priority_spots = TRIP_TYPE_MAP.get(trip_type, [])
     all_spots_info = "\n".join([
-        f"- {row['景點名稱_中文']}（{row['地點類型']}，停留：{row['平均停留時間建議']}）"
+        f"- {row['景點名稱_中文']}（{row['地點類型']}，停留：{row['平均停留時間建議']}，最佳季節：{row['最佳造訪季節']}）"
         for _, row in df.iterrows()
     ])
     priority_str = "、".join(priority_spots)
@@ -181,7 +198,33 @@ def generate_itinerary(trip_type: str, total_days: int) -> dict:
     valid_names = [row['景點名稱_中文'] for _, row in df.iterrows()]
     valid_names_str = "、".join(valid_names)
 
-    prompt = f"""你是尼泊爾旅遊專家。請為偏好「{trip_type}」的旅客規劃 {total_days} 天行程。
+    month_hint = f"出發月份：{travel_month}，請優先安排當月屬於最佳造訪季節的景點。" if travel_month else ""
+
+    companion_guide = {
+        "親子": "請避免高強度健行景點（如聖母峰基地營），優先安排適合兒童的景點。",
+        "長輩同行": "請避免高海拔、高強度景點，優先安排交通方便、步行量少的景點。",
+        "情侶": "可優先安排景色優美、氣氛浪漫的景點。",
+    }.get(companion, "")
+
+    chat_hint = ""
+    if history:
+        recent = [h for h in history[-6:] if h.get("content")]
+        if recent:
+            lines = "\n".join(
+                f"{'使用者' if h['role'] == 'user' else '助理'}：{h['content'][:120]}"
+                for h in recent
+            )
+            chat_hint = f"對話中旅人提到的偏好（請參考）：\n{lines}"
+
+    prompt = f"""你是尼泊爾旅遊專家。請為旅客規劃 {total_days} 天行程。
+
+【旅客資訊】
+偏好類型：{trip_type}
+旅伴類型：{companion}
+{month_hint}
+{companion_guide}
+
+{chat_hint}
 
 【絕對限制】景點的 name 欄位只能使用以下清單中的名稱，必須完全一致，禁止自行新增、縮寫或創造任何其他景點：
 {valid_names_str}
@@ -304,9 +347,15 @@ def _img_src(source: str, img: str) -> str:
     return img
 
 
-def show_spot_card(spot: dict):
+def show_spot_card(spot: dict, travel_month_num: int = 0):
     name = spot['name']
     source, img = load_spot_image(name)
+
+    season_warning = False
+    if travel_month_num:
+        match = df[df['景點名稱_中文'] == name]
+        if not match.empty:
+            season_warning = not is_best_season(match.iloc[0]['最佳造訪季節'], travel_month_num)
 
     img_col, info_col = st.columns([1, 2.5])
 
@@ -332,6 +381,10 @@ def show_spot_card(spot: dict):
             )
 
     with info_col:
+        warning_html = (
+            '<p style="margin:6px 0 0 0;color:#92650a;font-size:13px;background:#fff3cd;'
+            'padding:4px 8px;border-radius:4px;display:inline-block;">⚠️ 非最佳造訪季節，請評估天氣狀況</p>'
+        ) if season_warning else ""
         st.markdown(
             f'<div style="background:#F5F0E8;border-left:4px solid #5B8A5B;border-radius:10px;'
             f'padding:14px 16px;height:100%;">'
@@ -339,6 +392,7 @@ def show_spot_card(spot: dict):
             f'<p style="margin:4px 0;color:#555;font-size:14px;">⏱️ {spot["duration"]}</p>'
             f'<p style="margin:4px 0;color:#555;font-size:14px;">🍽️ {spot["food"]}</p>'
             f'<p style="margin:4px 0;color:#E07B39;font-size:14px;">💡 {spot["tip"]}</p>'
+            f'{warning_html}'
             f'</div>',
             unsafe_allow_html=True
         )
@@ -346,12 +400,12 @@ def show_spot_card(spot: dict):
     st.markdown("<div style='margin-bottom:12px;'></div>", unsafe_allow_html=True)
 
 
-def show_itinerary_cards(itinerary_data: dict):
+def show_itinerary_cards(itinerary_data: dict, travel_month_num: int = 0):
     for day_data in itinerary_data['days']:
         day_num = day_data['day']
         st.markdown(f"### 📅 第 {day_num} 天行程")
         for spot in day_data['spots']:
-            show_spot_card(spot)
+            show_spot_card(spot, travel_month_num)
 
 
 # ============================================================
@@ -420,6 +474,15 @@ with st.sidebar:
         "選擇您偏好的旅遊類型",
         ["冒險健行", "文化宗教", "自然生態"],
     )
+    companion = st.selectbox(
+        "旅伴類型",
+        ["獨旅", "情侶", "親子", "長輩同行"],
+    )
+    travel_month = st.selectbox(
+        "出發月份",
+        [f"{i}月" for i in range(1, 13)],
+    )
+    travel_month_num = int(travel_month.replace("月", ""))
 
     st.markdown("### 📅 規劃進度")
     total_days = st.number_input("請輸入行程總天數", min_value=1, max_value=14, value=3, step=1)
@@ -432,17 +495,27 @@ with st.sidebar:
     if st.button("生成建議行程", use_container_width=True, type="primary"):
         with st.spinner("AI 正在規劃行程..."):
             try:
-                result = generate_itinerary(trip_type, total_days)
+                result = generate_itinerary(
+                    trip_type, total_days, travel_month, companion,
+                    st.session_state.conversation_history,
+                )
                 st.session_state.itinerary = result
                 st.rerun()
             except Exception as e:
                 st.error(f"行程生成失敗：{e}")
 
+    if st.button("🔄 清空重來", use_container_width=True):
+        st.session_state.itinerary = None
+        st.session_state.conversation_history = []
+        st.session_state.emotion_log = []
+        st.session_state.trend_counter = Counter()
+        st.rerun()
+
 # ============================================================
 # 主畫面：行程卡片 → 地圖 → 聊天
 # ============================================================
 if st.session_state.itinerary:
-    show_itinerary_cards(st.session_state.itinerary)
+    show_itinerary_cards(st.session_state.itinerary, travel_month_num)
     show_map(st.session_state.itinerary)
     st.markdown("---")
 
