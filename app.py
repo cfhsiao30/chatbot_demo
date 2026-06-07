@@ -515,7 +515,7 @@ if 'itinerary' not in st.session_state:
 # 🔟 側欄
 # ============================================================
 with st.sidebar:
-    st.markdown("### 🧭 旅遊偏好")
+    st.markdown("### 🌐 旅遊偏好")
     trip_type = st.selectbox(
         "選擇您偏好的旅遊類型",
         ["冒險健行", "文化宗教", "自然生態"],
@@ -531,8 +531,9 @@ with st.sidebar:
     travel_month_num = int(travel_month.replace("月", ""))
 
     st.markdown("### 📍 指定景點")
+    st.markdown("**想去哪些地方？**")
     must_visit = st.text_input(
-        "想去哪些地方？（自由填寫或由旅伴推薦）",
+        "（自由填寫或由旅伴推薦）",
         placeholder="例：想看犀牛、想體驗叢林健行、一定要去博卡拉...",
     )
 
