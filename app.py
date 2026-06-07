@@ -159,17 +159,26 @@ def load_spot_image(name: str):
 # ============================================================
 # 5️⃣ 行程生成（Gemini）
 # ============================================================
-def generate_itinerary(preferences: list, total_days: int) -> dict:
-    prefs_str = "、".join(preferences) if preferences else "綜合體驗"
-    spots_info = "\n".join([
-        f"- {row['景點名稱_中文']}（{row['地點類型']}，適合：{'、'.join(row['適合族群建議']) if isinstance(row['適合族群建議'], list) else row['適合族群建議']}，停留：{row['平均停留時間建議']}）"
+TRIP_TYPE_MAP = {
+    "冒險健行": ["安娜普納基地營", "聖母峰基地營健行", "朗塘國家公園"],
+    "文化宗教": ["斯瓦揚布佛塔", "帕舒帕提那寺", "藍毗尼", "巴克塔普爾杜巴廣場"],
+    "自然生態": ["博卡拉", "奇特旺國家公園", "巴迪亞國家公園"],
+}
+
+def generate_itinerary(trip_type: str, total_days: int) -> dict:
+    priority_spots = TRIP_TYPE_MAP.get(trip_type, [])
+    all_spots_info = "\n".join([
+        f"- {row['景點名稱_中文']}（{row['地點類型']}，停留：{row['平均停留時間建議']}）"
         for _, row in df.iterrows()
     ])
+    priority_str = "、".join(priority_spots)
 
-    prompt = f"""你是尼泊爾旅遊專家。請為偏好「{prefs_str}」的旅客規劃 {total_days} 天行程。
+    prompt = f"""你是尼泊爾旅遊專家。請為偏好「{trip_type}」的旅客規劃 {total_days} 天行程。
 
-可選景點（景點名稱必須與以下清單完全一致）：
-{spots_info}
+優先景點（請優先從以下選擇，景點名稱必須完全一致）：{priority_str}
+
+所有可選景點：
+{all_spots_info}
 
 請只回傳純 JSON，不要任何說明文字或 markdown 標記：
 {{
@@ -389,10 +398,9 @@ if 'itinerary' not in st.session_state:
 # ============================================================
 with st.sidebar:
     st.markdown("### 🧭 旅遊偏好")
-    preferences = st.multiselect(
+    trip_type = st.radio(
         "選擇您偏好的旅遊類型",
-        ["冒險健行", "文化古蹟", "宗教聖地", "自然風景", "美食體驗"],
-        placeholder="Choose options",
+        ["冒險健行", "文化宗教", "自然生態"],
     )
 
     st.markdown("### 📅 規劃進度")
@@ -406,7 +414,7 @@ with st.sidebar:
     if st.button("生成建議行程", use_container_width=True, type="primary"):
         with st.spinner("AI 正在規劃行程..."):
             try:
-                result = generate_itinerary(preferences, total_days)
+                result = generate_itinerary(trip_type, total_days)
                 st.session_state.itinerary = result
                 st.rerun()
             except Exception as e:
