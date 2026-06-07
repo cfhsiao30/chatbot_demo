@@ -23,37 +23,68 @@ except ImportError:
 st.set_page_config(layout="wide", page_title="尼泊爾旅遊設計師")
 
 # ============================================================
-# Color palette (based on #E8EDD0 natural green)
+# Color palette — match screenshot (teal sidebar + white main)
 # ============================================================
-BG         = "#E8EDD0"
-SIDEBAR_BG = "#D4E2B0"
-CARD       = "#F5F2E4"
-CIRCLE     = "#3D6B4F"
-LINE       = "#8B6B3D"
-TIME_CLR   = "#C8860A"
-TITLE      = "#3D2B1F"
-ICON_BG    = "#7A9E7E"
-ACCENT     = "#5A8C6E"
+SIDEBAR_BG = "#1A8686"   # dark teal sidebar (from screenshot)
+SIDEBAR_TX = "#FFFFFF"   # sidebar text: white
+CARD       = "#F5F0E8"   # day card background: beige (user specified)
+CIRCLE     = "#1A8686"   # timeline circle: teal
+LINE       = "#AAAAAA"   # connector line: light gray
+TIME_CLR   = "#C8860A"   # time label: amber
+TITLE      = "#1A1A1A"   # main text: near-black
+CARD_TITLE = "#1A8686"   # card section title: teal
+ICON_BG    = "#1A8686"   # image border: teal
+ACCENT     = "#1A8686"   # accent / button: teal
 WHITE      = "#FFFFFF"
 
 st.markdown(f"""
 <style>
+/* ── Global ── */
 [data-testid="stAppViewContainer"] {{ background-color: #FFFFFF; }}
-[data-testid="stSidebar"] {{ background-color: #FFFFFF; }}
-[data-testid="stSidebar"] .stMarkdown h3 {{ color: {TITLE}; }}
 
-/* ── Day card ── */
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {{
+    background-color: {SIDEBAR_BG};
+}}
+[data-testid="stSidebar"] * {{
+    color: {SIDEBAR_TX} !important;
+}}
+[data-testid="stSidebar"] .stMarkdown h3 {{
+    color: {SIDEBAR_TX} !important;
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+}}
+[data-testid="stSidebar"] .stSelectbox > div,
+[data-testid="stSidebar"] .stMultiSelect > div,
+[data-testid="stSidebar"] .stNumberInput > div {{
+    background-color: rgba(255,255,255,0.15) !important;
+    border-color: rgba(255,255,255,0.4) !important;
+    border-radius: 8px;
+}}
+[data-testid="stSidebar"] .stButton > button {{
+    background-color: {WHITE} !important;
+    color: {SIDEBAR_BG} !important;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+}}
+[data-testid="stSidebar"] .stButton > button:hover {{
+    background-color: #e0f0f0 !important;
+}}
+
+/* ── Day card (beige, natural) ── */
 .day-card {{
     background: {CARD};
     border-radius: 18px;
     padding: 22px 26px 14px;
-    box-shadow: 0 3px 18px rgba(61,43,31,.10);
+    box-shadow: 0 3px 18px rgba(0,0,0,.08);
     margin-bottom: 14px;
 }}
 .day-title {{
     font-size: 1.35rem;
     font-weight: 800;
-    color: {TITLE};
+    color: {CARD_TITLE};
     margin-bottom: 18px;
 }}
 
@@ -84,7 +115,7 @@ st.markdown(f"""
 .node-icon  {{ font-size: 1.25rem; margin-bottom: 3px; }}
 .node-name  {{ font-size: .76rem; font-weight: 600; color: {TITLE}; margin-bottom: 2px; }}
 .node-time  {{ font-size: .70rem; color: {TIME_CLR}; font-weight: 500; }}
-.node-dur   {{ font-size: .66rem; color: #777; }}
+.node-dur   {{ font-size: .66rem; color: #888; }}
 
 /* ── Connector ── */
 .connector {{
@@ -94,14 +125,14 @@ st.markdown(f"""
 }}
 .conn-line {{
     width: 100%;
-    border-top: 2.5px dashed {LINE};
+    border-top: 2px dashed {LINE};
 }}
 .conn-label {{
-    font-size: .60rem; color: {LINE};
+    font-size: .60rem; color: #999;
     margin-top: 3px; white-space: nowrap;
 }}
 
-/* ── Stop detail ── */
+/* ── Stop detail (inside card) ── */
 .stop-detail {{
     background: {WHITE};
     border-radius: 12px;
@@ -110,7 +141,7 @@ st.markdown(f"""
     display: flex;
     gap: 14px;
     align-items: flex-start;
-    box-shadow: 0 1px 6px rgba(61,43,31,.06);
+    box-shadow: 0 1px 6px rgba(0,0,0,.05);
 }}
 .stop-img {{
     width: 136px; min-width: 136px; height: 96px;
@@ -121,11 +152,11 @@ st.markdown(f"""
 .stop-img-ph {{
     width: 136px; min-width: 136px; height: 96px;
     border-radius: 8px;
-    background: {ICON_BG}44;
+    background: {ICON_BG}22;
     display: flex; align-items: center; justify-content: center;
     font-size: 2rem; color: {ICON_BG};
 }}
-.stop-info h4 {{ margin: 0 0 5px; color: {TITLE}; font-size: .93rem; }}
+.stop-info h4 {{ margin: 0 0 5px; color: {CARD_TITLE}; font-size: .93rem; }}
 .stop-info p  {{ margin: 3px 0; font-size: .80rem; color: #555; line-height: 1.4; }}
 
 /* ── Page indicator ── */
@@ -388,7 +419,7 @@ st.markdown(f"""
 <div style="margin-bottom:18px">
   <span style="font-size:2rem;font-weight:800;color:{TITLE}">🏔️ 尼泊爾旅遊設計師</span><br>
   <span style="color:{ACCENT};font-size:1rem">打造專屬你的夢幻尼泊爾之旅</span><br>
-  <span style="color:{LINE};font-size:.85rem">🎒 旅途準備好了嗎？AI旅伴已打包好地圖與好心情。</span>
+  <span style="color:#888;font-size:.85rem">🎒 旅途準備好了嗎？AI旅伴已打包好地圖與好心情。</span>
 </div>
 """, unsafe_allow_html=True)
 
@@ -533,7 +564,7 @@ else:
 # Chat interface
 # ============================================================
 st.markdown(
-    f"<hr style='border-color:{LINE}44;margin:22px 0 10px'>"
+    f"<hr style='border-color:#ddd;margin:22px 0 10px'>"
     f"<h4 style='color:{TITLE}'>💬 旅遊問題？問我吧！</h4>",
     unsafe_allow_html=True,
 )
