@@ -254,8 +254,8 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
             chat_hint = f"對話中旅人提到的偏好（請參考）：\n{lines}"
 
     must_hint = ""
-    if must_visit and must_visit.strip():
-        must_hint = f"【旅客指定需求】{must_visit.strip()}\n請務必將此需求反映在行程規劃中。\n"
+    if must_visit:
+        must_hint = f"【必訪景點】旅客明確指定以下景點，行程中必須全部安排，不得省略：{'、'.join(must_visit)}\n"
 
     prompt = f"""你是尼泊爾旅遊專家。請為旅客規劃 {total_days} 天行程。
 
@@ -531,10 +531,9 @@ with st.sidebar:
     travel_month_num = int(travel_month.replace("月", ""))
 
     st.markdown("### 📍 指定景點")
-    st.markdown("**想去哪些地方？**")
-    must_visit = st.text_input(
-        "（自由填寫或由旅伴推薦）",
-        placeholder="例：想看犀牛、想體驗叢林健行、一定要去博卡拉...",
+    must_visit = st.multiselect(
+        "指定景點，搭配下拉選單",
+        df['景點名稱_中文'].tolist(),
     )
 
     st.markdown("### 📅 規劃進度")
