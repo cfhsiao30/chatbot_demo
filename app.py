@@ -165,10 +165,22 @@ WIKIMEDIA_IMAGES = {
     "巴迪亞國家公園":   "https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/Bardiya_02.jpg/330px-Bardiya_02.jpg",
 }
 
+_COMMONS_SKIP = {"map", "plan", "diagram", "logo", "flag", "icon", "chart",
+                 "graph", "template", "seal", "coat", "symbol", "emblem", "sign"}
+
+def _is_photo_url(url: str) -> bool:
+    """過濾非照片檔案：排除 SVG 及地圖/示意圖等。"""
+    lower = url.lower()
+    if lower.endswith(".svg"):
+        return False
+    filename = lower.rsplit("/", 1)[-1]
+    return not any(kw in filename for kw in _COMMONS_SKIP)
+
+
 @st.cache_data(show_spinner=False)
 def fetch_commons_image(search_query: str, fallback_parent: str = "") -> str | None:
-    """以 search_query 精準搜尋 Wikimedia Commons 圖片。
-    找不到時以 fallback_parent 英文名再試一次。"""
+    """以 search_query 精準搜尋 Wikimedia Commons 照片。
+    找不到真實照片時，以 fallback_parent 英文名再試一次。"""
     for query in dict.fromkeys([search_query, WIKIPEDIA_TITLES.get(fallback_parent, "")]):
         if not query:
             continue
@@ -178,10 +190,10 @@ def fetch_commons_image(search_query: str, fallback_parent: str = "") -> str | N
                 "generator": "search",
                 "gsrnamespace": "6",
                 "gsrsearch": query,
-                "gsrlimit": "5",
+                "gsrlimit": "10",
                 "prop": "imageinfo",
-                "iiprop": "url",
-                "iiurlwidth": "400",
+                "iiprop": "url|size",
+                "iiurlwidth": "600",
                 "format": "json",
                 "origin": "*",
             }
@@ -196,7 +208,7 @@ def fetch_commons_image(search_query: str, fallback_parent: str = "") -> str | N
                 for page in sorted(pages.values(), key=lambda p: p.get("index", 0)):
                     info = page.get("imageinfo", [{}])[0]
                     url = info.get("thumburl") or info.get("url", "")
-                    if url and not url.lower().endswith(".svg"):
+                    if url and _is_photo_url(url):
                         return url
         except Exception:
             continue
@@ -300,7 +312,12 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
 - name：具體活動或體驗名稱，可自由描述（例：「犀牛河獨木舟觀鳥」、「斯瓦揚布佛塔日出參拜」）
 - parent：必須從以下清單選一個最相關的景點名稱（用於資料對應，必須完全一致）：
   {valid_names_str}
-- search_query：2–4 個英文關鍵字，用於搜尋此活動的代表圖片（例："Phewa Lake kayak Nepal"、"Sarangkot sunrise Himalayas"、"Davis Falls Pokhara"）
+- search_query：2–4 個英文關鍵字，用於搜尋此活動的代表照片。規則：
+  · 必須使用具體地名或景觀名詞，不用動詞或抽象詞
+  · 交通/移動類活動：用目的地景觀名，例如 "Chitwan jungle Nepal"
+  · 自然活動：用地點+景物，例如 "Phewa Lake Pokhara"、"Rapti River Chitwan"
+  · 文化/宗教活動：用建築或儀式名，例如 "Swayambhunath temple"、"Pashupatinath cremation ghat"
+  · 健行活動：用山名或健行路線，例如 "Annapurna trek mountain"、"Langtang valley glacier"
 
 各景點參考資訊：
 {all_spots_info}
@@ -570,7 +587,7 @@ with st.sidebar:
 
     st.markdown("### 🗺️ 參考行程")
     if st.button("生成建議行程", use_container_width=True, type="primary"):
-        with st.spinner("規劃中..."):
+        with st.spinner("AI 正在規劃行程..."):
             try:
                 result = generate_itinerary(
                     trip_type, total_days, travel_month, companion,
