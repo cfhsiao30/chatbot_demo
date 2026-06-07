@@ -165,13 +165,35 @@ WIKIMEDIA_IMAGES = {
     "巴迪亞國家公園":   "https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/Bardiya_02.jpg/330px-Bardiya_02.jpg",
 }
 
+@st.cache_data(show_spinner=False)
+def fetch_wiki_thumbnail(chinese_name: str) -> str | None:
+    """從 Wikipedia API 取得景點縮圖 URL，結果快取避免重複請求。"""
+    title = WIKIPEDIA_TITLES.get(chinese_name)
+    if not title:
+        return None
+    try:
+        url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{title}"
+        r = requests.get(url, timeout=6, headers={"User-Agent": "NepalTravelApp/1.0"})
+        if r.status_code == 200:
+            return r.json().get("thumbnail", {}).get("source")
+    except Exception:
+        pass
+    return None
+
+
 def load_spot_image(name: str):
-    """優先用本地 images/ 資料夾；找不到則用 Wikimedia Commons 備援圖。
-    回傳 (來源, 圖片路徑或URL)，來源為 'local' 或 'wikimedia'。"""
+    """圖片來源優先順序：
+    ① 本地 images/（開發者覆蓋，放同名圖片即生效）
+    ② Wikipedia API（自動抓取，對應 WIKIPEDIA_TITLES）
+    ③ Wikimedia 硬編碼備援
+    回傳 (來源, 路徑或URL)，來源為 'local' / 'web' / 'wikimedia'。"""
     for ext in ['.jpg', '.jpeg', '.png', '.webp']:
         path = Path(f"images/{name}{ext}")
         if path.exists():
             return 'local', str(path)
+    wiki_url = fetch_wiki_thumbnail(name)
+    if wiki_url:
+        return 'web', wiki_url
     if name in WIKIMEDIA_IMAGES:
         return 'wikimedia', WIKIMEDIA_IMAGES[name]
     return None, None
@@ -202,7 +224,7 @@ TRIP_TYPE_MAP = {
     "自然生態": ["博卡拉", "奇特旺國家公園", "巴迪亞國家公園"],
 }
 
-def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", companion: str = "", history: list = None) -> dict:
+def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", companion: str = "", history: list = None, must_visit: list = None) -> dict:
     priority_spots = TRIP_TYPE_MAP.get(trip_type, [])
     all_spots_info = "\n".join([
         f"- {row['景點名稱_中文']}（{row['地點類型']}，停留：{row['平均停留時間建議']}，最佳季節：{row['最佳造訪季節']}）"
@@ -231,6 +253,10 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
             )
             chat_hint = f"對話中旅人提到的偏好（請參考）：\n{lines}"
 
+    must_hint = ""
+    if must_visit:
+        must_hint = f"【必訪景點】旅客明確指定以下景點，行程中必須全部安排，不得省略：{'、'.join(must_visit)}\n"
+
     prompt = f"""你是尼泊爾旅遊專家。請為旅客規劃 {total_days} 天行程。
 
 【旅客資訊】
@@ -239,24 +265,32 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
 {month_hint}
 {companion_guide}
 
+{must_hint}
 {chat_hint}
 
-【絕對限制】景點的 name 欄位只能使用以下清單中的名稱，必須完全一致，禁止自行新增、縮寫或創造任何其他景點：
-{valid_names_str}
+【行程規劃原則】
+- 請以「具體活動或體驗」為單位安排行程，而非重複填寫同一個景點大名。
+  例如：填「吉普車叢林巡遊」而非重複填「奇特旺國家公園」。
+- 整趟行程每項活動不得重複出現。
+- 若偏好類型景點不足以填滿天數，可跨類型補充，讓行程豐富完整。
 
-優先選擇（符合 {trip_type} 類型）：{priority_str}
+【欄位規則】
+- name：具體活動或體驗名稱，可自由描述（例：「犀牛河獨木舟觀鳥」、「斯瓦揚布佛塔日出參拜」）
+- parent：必須從以下清單選一個最相關的景點名稱（用於圖片對應，必須完全一致）：
+  {valid_names_str}
 
-各景點資訊：
+各景點參考資訊：
 {all_spots_info}
 
-每天安排 2–3 個景點。回傳格式（純 JSON）：
+每天安排 2–3 項活動。回傳格式（純 JSON）：
 {{
   "days": [
     {{
       "day": 1,
       "spots": [
         {{
-          "name": "景點名稱（必須完全符合上方清單）",
+          "name": "具體活動名稱",
+          "parent": "對應景點（必須符合上方清單）",
           "duration": "建議停留時間",
           "food": "餐食建議（一句話）",
           "tip": "小提醒（一句話）"
@@ -364,17 +398,18 @@ def _img_src(source: str, img: str) -> str:
 
 def _spot_card_html(spot: dict, travel_month_num: int = 0) -> str:
     name = spot['name']
-    source, img = load_spot_image(name)
+    parent = spot.get('parent', name)
+    source, img = load_spot_image(parent)
 
     season_warning = False
     if travel_month_num:
-        match = df[df['景點名稱_中文'] == name]
+        match = df[df['景點名稱_中文'] == parent]
         if not match.empty:
             season_warning = not is_best_season(match.iloc[0]['最佳造訪季節'], travel_month_num)
 
     if img:
         src = _img_src(source, img)
-        credit = '<p style="font-size:10px;color:#999;margin:2px 4px 0;">© Wikimedia Commons CC BY-SA</p>' if source == 'wikimedia' else ''
+        credit = '<p style="font-size:10px;color:#999;margin:2px 4px 0;">© Wikipedia CC BY-SA</p>' if source in ('web', 'wikimedia') else ''
         img_html = (
             f'<img src="{src}" style="width:100%;height:150px;object-fit:cover;'
             f'border-radius:10px 10px 0 0;display:block;">{credit}'
@@ -495,6 +530,12 @@ with st.sidebar:
     )
     travel_month_num = int(travel_month.replace("月", ""))
 
+    st.markdown("### 📍 指定景點")
+    must_visit = st.multiselect(
+        "想去哪些地方？（可複選，不選由 AI 決定）",
+        df['景點名稱_中文'].tolist(),
+    )
+
     st.markdown("### 📅 規劃進度")
     total_days = st.number_input("請輸入行程總天數", min_value=1, max_value=14, value=3, step=1)
 
@@ -509,6 +550,7 @@ with st.sidebar:
                 result = generate_itinerary(
                     trip_type, total_days, travel_month, companion,
                     st.session_state.conversation_history,
+                    must_visit,
                 )
                 st.session_state.itinerary = result
                 st.rerun()
