@@ -10,6 +10,7 @@ import json
 import re
 from pathlib import Path
 from google import genai
+from google.genai import types
 
 try:
     import folium
@@ -199,11 +200,14 @@ def generate_itinerary(trip_type: str, total_days: int) -> dict:
 
 每天安排 2–3 個景點，依旅客偏好選擇最合適的景點。"""
 
-    response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-    raw = response.text.strip()
-    raw = re.sub(r'^```(?:json)?\n?', '', raw)
-    raw = re.sub(r'\n?```$', '', raw)
-    return json.loads(raw)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json"
+        ),
+    )
+    return json.loads(response.text)
 
 # ============================================================
 # 6️⃣ RAG 檢索與回答生成
