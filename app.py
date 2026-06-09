@@ -670,7 +670,7 @@ with col_left:
     )
 
     # ── 對話歷史：原生捲動容器 ──────────────────────────────
-    history_box = st.container(height=520, border=False)
+    history_box = st.container(height=360, border=False)
     with history_box:
         if not st.session_state.conversation_history:
             st.markdown(
@@ -743,7 +743,7 @@ with col_right:
     rc1, rc2 = st.columns([3, 1])
     with rc1:
         planned = len(st.session_state.itinerary['days']) if st.session_state.itinerary else 0
-        label = f"📅 已規劃 {planned} 天行程" if planned else "📋 行程面板"
+        label = f"📅 已規劃 {planned} 天行程" if planned else ""
         st.markdown(f"<p style='font-size:15px;font-weight:600;color:#1a1a1a;margin:0 0 8px 0;'>{label}</p>", unsafe_allow_html=True)
     with rc2:
         if st.button("🔄 清空", use_container_width=True):
