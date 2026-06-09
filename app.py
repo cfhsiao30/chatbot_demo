@@ -27,27 +27,90 @@ st.set_page_config(layout="wide", page_title="尼泊爾旅遊設計師")
 
 st.markdown("""
 <style>
-.day-header {
-    background: #5B8A5B;
-    color: white;
-    padding: 10px 20px;
-    border-radius: 8px;
-    margin: 20px 0 10px 0;
+/* ── 全域 reset ── */
+html, body, [data-testid="stAppViewContainer"] {
+    height: 100vh;
+    overflow: hidden;
 }
-.spot-card {
-    background: #F5F0E8;
-    padding: 12px;
-    border-radius: 8px;
-    border-left: 4px solid #5B8A5B;
+[data-testid="stAppViewContainer"] > div:first-child {
+    height: 100vh;
+    overflow: hidden;
 }
+
+/* ── 頂部 header 隱藏多餘空白 ── */
+[data-testid="stHeader"] { display: none; }
+.main > div { padding-top: 0 !important; }
+
+/* ── 左右雙欄容器：撐滿視窗高度 ── */
+[data-testid="column"]:first-child {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid #e5e5e5;
+    padding: 0 !important;
+}
+[data-testid="column"]:last-child {
+    height: 100vh;
+    overflow-y: auto;
+    padding: 16px 20px !important;
+    background: #fafaf9;
+}
+
+/* ── 左欄：對話歷史區捲動 ── */
+.chat-history-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 16px 8px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: #d1d5db transparent;
+}
+.chat-history-scroll::-webkit-scrollbar { width: 5px; }
+.chat-history-scroll::-webkit-scrollbar-thumb {
+    background: #d1d5db; border-radius: 3px;
+}
+
+/* ── 左欄 header ── */
+.chat-header {
+    padding: 16px 20px 12px 20px;
+    border-bottom: 1px solid #e5e5e5;
+    background: white;
+    flex-shrink: 0;
+}
+.chat-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+/* ── 輸入框固定在左欄底部 ── */
+.chat-input-wrapper {
+    flex-shrink: 0;
+    padding: 10px 12px;
+    border-top: 1px solid #e5e5e5;
+    background: white;
+}
+
+/* ── chat_input 強制貼底 ── */
+[data-testid="stChatInput"] {
+    position: static !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
+}
+
+/* ── 行程小卡 ── */
 div[data-testid="stProgressBar"] > div > div > div {
     background-color: #5B8A5B !important;
 }
-/* 左側聊天區固定高度，對話框釘在底部 */
-[data-testid="stVerticalBlock"] .chat-col-inner {
-    display: flex;
-    flex-direction: column;
-    height: calc(100vh - 120px);
+
+/* ── 右欄 scrollbar ── */
+[data-testid="column"]:last-child::-webkit-scrollbar { width: 5px; }
+[data-testid="column"]:last-child::-webkit-scrollbar-thumb {
+    background: #d1d5db; border-radius: 3px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -589,7 +652,8 @@ def extract_trip_params(history: list) -> dict:
 {{
   "trip_type": "冒險健行 或 文化宗教 或 自然生態 或 null",
   "companion": "個人獨旅 或 情侶同遊 或 親子同遊 或 長輩同行 或 null",
-  "travel_month": "X月 格式（如 10月）或 null"
+  "travel_month": "X月 格式（如 10月）或 null",
+  "days": "整數天數（如 5），若對話中未提及則填 null"
 }}"""
     try:
         response = client.models.generate_content(
@@ -627,123 +691,34 @@ def log_trend(emotion_label):
 
 
 # ============================================================
-# 🔟 主畫面：左右均分雙欄
+# 🔟 主畫面：Claude.ai 風格雙欄版面
 # ============================================================
-st.title("🏔️ 尼泊爾旅遊設計師")
-st.caption("打造專屬你的夢幻尼泊爾之旅")
+col_left, col_right = st.columns(2, gap="small")
 
-col_left, col_right = st.columns(2, gap="medium")
-
-# ── 右欄：進度控制 + 行程卡 + 地圖 ──────────────────────────
-with col_right:
-    # 規劃進度 + 清空按鈕
-    with st.container(border=True):
-        planned = len(st.session_state.itinerary['days']) if st.session_state.itinerary else 0
-        st.markdown(f"**📅 規劃進度**　已規劃 {planned} 天行程")
-        if st.button("🔄 清空重來", use_container_width=True):
-            st.session_state.itinerary = None
-            st.session_state.conversation_history = []
-            st.session_state.emotion_log = []
-            st.session_state.trend_counter = Counter()
-            st.session_state.show_confirmation = False
-            st.session_state.extracted_params = {}
-            st.session_state.itinerary_month_num = 0
-            st.rerun()
-
-    # 確認小卡：AI 偵測到規劃意圖後出現
-    if st.session_state.show_confirmation:
-        params = st.session_state.extracted_params
-        companion_label = params.get('companion') or '未指定'
-        trip_type_label = params.get('trip_type') or '綜合推薦'
-        month_label     = params.get('travel_month') or '未指定'
-
-        # AI 判讀天數（從對話中粗估，找不到給預設 3）
-        raw_days_hint = 3
-        for h in reversed(st.session_state.conversation_history[-12:]):
-            content = h.get('content', '')
-            days_match = re.search(r'(\d+)\s*天', content)
-            if days_match:
-                raw_days_hint = min(14, max(1, int(days_match.group(1))))
-                break
-
-        with st.container(border=True):
-            st.markdown("### 🗺️ 我已掌握您的旅程輪廓！")
-            st.markdown(f"**{companion_label}・{trip_type_label}・{month_label}出發**")
-            st.caption("天數與景點確認後，即可生成您的專屬行程。")
-
-            confirm_days = st.number_input(
-                "行程天數（AI 已根據對話預填）",
-                min_value=1, max_value=14,
-                value=raw_days_hint,
-                step=1, key="confirm_days"
-            )
-
-            # AI 預選旅伴類型
-            companion_options = ["個人獨旅", "情侶同遊", "親子同遊", "長輩同行"]
-            ai_companion_idx = companion_options.index(companion_label) if companion_label in companion_options else 0
-            confirm_companion = st.selectbox(
-                "旅伴類型（AI 已根據對話預填）",
-                companion_options,
-                index=ai_companion_idx,
-                key="confirm_companion"
-            )
-
-            # AI 預選旅遊偏好
-            type_options = ["冒險健行", "文化宗教", "自然生態"]
-            ai_type_idx = type_options.index(trip_type_label) if trip_type_label in type_options else 1
-            confirm_trip_type = st.selectbox(
-                "旅遊偏好（AI 已根據對話預填）",
-                type_options,
-                index=ai_type_idx,
-                key="confirm_trip_type"
-            )
-
-            confirm_must = st.multiselect(
-                "指定景點（選填）", df['景點名稱_中文'].tolist(), key="confirm_must"
-            )
-
-            c1, c2 = st.columns([2, 1])
-            with c1:
-                if st.button("✨ 為我生成專屬行程", type="primary", use_container_width=True):
-                    final_month = params.get('travel_month') or ''
-                    month_num = int(final_month.replace("月", "")) if final_month and '月' in final_month else 0
-                    with st.spinner("✈️ 旅伴正在為您打包行程…"):
-                        try:
-                            result = generate_itinerary(
-                                confirm_trip_type, int(confirm_days), final_month,
-                                confirm_companion,
-                                st.session_state.conversation_history,
-                                confirm_must,
-                            )
-                            st.session_state.itinerary = result
-                            st.session_state.itinerary_month_num = month_num
-                            st.session_state.show_confirmation = False
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"行程生成失敗：{e}")
-            with c2:
-                if st.button("繼續聊聊", use_container_width=True):
-                    st.session_state.show_confirmation = False
-                    st.rerun()
-
-    # 行程卡片 + 地圖
-    if st.session_state.itinerary:
-        show_itinerary_cards(st.session_state.itinerary, st.session_state.itinerary_month_num)
-        show_map(st.session_state.itinerary)
-
-    # 尚無行程時顯示引導提示
-    if not st.session_state.itinerary and not st.session_state.show_confirmation:
-        st.info("🎒 旅途準備好了嗎？\n\n在左側與 AI 旅伴聊聊你的偏好，說「幫我規劃行程」即可生成專屬行程小卡。")
-
-# ── 左欄：對話區 ──────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+# 左欄：對話區（上方捲動歷史 + 底部輸入框）
+# ══════════════════════════════════════════════════════════════
 with col_left:
-    st.markdown("### 💬 旅遊問答")
+    # Header
+    st.markdown(
+        '<div class="chat-header"><h3>🏔️ 尼泊爾旅遊設計師</h3>'
+        '<p style="margin:4px 0 0 0;font-size:12px;color:#888;">與 AI 旅伴聊聊，說「幫我規劃行程」即可生成行程</p></div>',
+        unsafe_allow_html=True
+    )
 
+    # 對話歷史（捲動區）
+    st.markdown('<div class="chat-history-scroll" id="chat-history">', unsafe_allow_html=True)
     for message in st.session_state.conversation_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    if query := st.chat_input("詢問旅遊建議，或說「幫我規劃行程」…"):
+    # 輸入框（固定底部）
+    st.markdown('<div class="chat-input-wrapper">', unsafe_allow_html=True)
+    query = st.chat_input("詢問旅遊建議，或說「幫我規劃行程」…")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    if query:
         if not wants_itinerary(query):
             st.session_state.show_confirmation = False
 
@@ -751,6 +726,7 @@ with col_left:
             "role": "user", "content": query, "query": query
         })
 
+        # 即時顯示 user 訊息（會在下次 rerun 後出現在歷史區）
         with st.chat_message("user"):
             st.markdown(query)
 
@@ -772,7 +748,6 @@ with col_left:
                         "source": source_names,
                         "trend_snapshot": dict(trend),
                     })
-
                     st.markdown(answer)
 
                 except Exception as e:
@@ -788,3 +763,134 @@ with col_left:
             st.session_state.extracted_params = params
             st.session_state.show_confirmation = True
             st.rerun()
+
+# ══════════════════════════════════════════════════════════════
+# 右欄：行程面板（捲動）
+# ══════════════════════════════════════════════════════════════
+with col_right:
+    # ── 頂部工具列 ────────────────────────────────────────────
+    rc1, rc2 = st.columns([3, 1])
+    with rc1:
+        planned = len(st.session_state.itinerary['days']) if st.session_state.itinerary else 0
+        label = f"📅 已規劃 {planned} 天行程" if planned else "📋 行程面板"
+        st.markdown(f"<p style='font-size:15px;font-weight:600;color:#1a1a1a;margin:0 0 8px 0;'>{label}</p>", unsafe_allow_html=True)
+    with rc2:
+        if st.button("🔄 清空", use_container_width=True):
+            st.session_state.itinerary = None
+            st.session_state.conversation_history = []
+            st.session_state.emotion_log = []
+            st.session_state.trend_counter = Counter()
+            st.session_state.show_confirmation = False
+            st.session_state.extracted_params = {}
+            st.session_state.itinerary_month_num = 0
+            st.rerun()
+
+    # ── 喜好確認小卡 ──────────────────────────────────────────
+    if st.session_state.show_confirmation:
+        params = st.session_state.extracted_params
+
+        # 天數：優先用 AI 萃取的 days，次用 regex fallback
+        ai_days = None
+        raw_days = params.get('days')
+        if raw_days is not None:
+            try:
+                ai_days = min(14, max(1, int(str(raw_days).replace('天', '').strip())))
+            except (ValueError, TypeError):
+                ai_days = None
+        if ai_days is None:
+            for h in reversed(st.session_state.conversation_history[-12:]):
+                m = re.search(r'(\d+)\s*天', h.get('content', ''))
+                if m:
+                    ai_days = min(14, max(1, int(m.group(1))))
+                    break
+        ai_days = ai_days or 3
+
+        # 旅伴
+        companion_options = ["個人獨旅", "情侶同遊", "親子同遊", "長輩同行"]
+        ai_companion = params.get('companion') or '個人獨旅'
+        ai_companion_idx = companion_options.index(ai_companion) if ai_companion in companion_options else 0
+
+        # 旅遊偏好
+        type_options = ["冒險健行", "文化宗教", "自然生態"]
+        ai_trip_type = params.get('trip_type') or '文化宗教'
+        ai_type_idx = type_options.index(ai_trip_type) if ai_trip_type in type_options else 1
+
+        # 月份
+        ai_month = params.get('travel_month') or '未指定'
+
+        with st.container(border=True):
+            st.markdown("### 🗺️ 已掌握您的旅程輪廓")
+
+            # AI 判讀摘要列
+            tags = []
+            if ai_companion != '個人獨旅' or params.get('companion'):
+                tags.append(f"👥 {ai_companion}")
+            tags.append(f"🧭 {ai_trip_type}")
+            if ai_month != '未指定':
+                tags.append(f"🗓️ {ai_month}出發")
+            tags.append(f"⏱️ {ai_days} 天")
+            st.markdown(
+                " &nbsp;｜&nbsp; ".join(
+                    f'<span style="background:#e8f0e8;color:#3d5a3d;padding:2px 8px;border-radius:10px;font-size:12px;">{t}</span>'
+                    for t in tags
+                ),
+                unsafe_allow_html=True,
+            )
+            st.caption("AI 已根據對話自動預填，可直接調整後生成行程。")
+            st.divider()
+
+            confirm_days = st.number_input(
+                "行程天數", min_value=1, max_value=14,
+                value=ai_days, step=1, key="confirm_days"
+            )
+            confirm_companion = st.selectbox(
+                "旅伴類型", companion_options,
+                index=ai_companion_idx, key="confirm_companion"
+            )
+            confirm_trip_type = st.selectbox(
+                "旅遊偏好", type_options,
+                index=ai_type_idx, key="confirm_trip_type"
+            )
+            confirm_must = st.multiselect(
+                "指定景點（選填）", df['景點名稱_中文'].tolist(), key="confirm_must"
+            )
+
+            g1, g2 = st.columns([2, 1])
+            with g1:
+                if st.button("✨ 為我生成專屬行程", type="primary", use_container_width=True):
+                    final_month = params.get('travel_month') or ''
+                    month_num = int(final_month.replace("月", "")) if final_month and '月' in final_month else 0
+                    with st.spinner("✈️ 旅伴正在為您打包行程…"):
+                        try:
+                            result = generate_itinerary(
+                                confirm_trip_type, int(confirm_days), final_month,
+                                confirm_companion,
+                                st.session_state.conversation_history,
+                                confirm_must,
+                            )
+                            st.session_state.itinerary = result
+                            st.session_state.itinerary_month_num = month_num
+                            st.session_state.show_confirmation = False
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"行程生成失敗：{e}")
+            with g2:
+                if st.button("繼續聊聊", use_container_width=True):
+                    st.session_state.show_confirmation = False
+                    st.rerun()
+
+    # ── 行程卡片 + 地圖 ───────────────────────────────────────
+    if st.session_state.itinerary:
+        show_itinerary_cards(st.session_state.itinerary, st.session_state.itinerary_month_num)
+        show_map(st.session_state.itinerary)
+
+    # ── 尚無行程時的引導畫面 ──────────────────────────────────
+    if not st.session_state.itinerary and not st.session_state.show_confirmation:
+        st.markdown("""
+<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+height:60vh;text-align:center;color:#999;">
+  <div style="font-size:48px;margin-bottom:16px;">🏔️</div>
+  <p style="font-size:16px;font-weight:500;color:#555;margin:0 0 8px 0;">行程面板</p>
+  <p style="font-size:13px;color:#aaa;margin:0;">在左側與 AI 旅伴聊聊你的偏好<br>說「幫我規劃行程」即可在此生成專屬行程</p>
+</div>
+""", unsafe_allow_html=True)
