@@ -48,8 +48,7 @@ div[data-testid="stProgressBar"] > div > div > div {
 """, unsafe_allow_html=True)
 
 st.title("🏔️ 尼泊爾旅遊設計師")
-st.caption("打造專屬你的夢幻尼泊爾之旅")
-st.info("🎒 旅途準備好了嗎？AI旅伴已打包好地圖與好心情。\n\n您可以試著先跟旅伴聊聊，讓旅伴對你的認識多一點，旅伴會儘量為您規劃最量身訂製的行程。")
+st.caption("打造專屬你的夢幻尼泊爾之旅｜先和旅伴聊聊，說「幫我規劃行程」即可生成專屬行程")
 
 # ============================================================
 # 1️⃣ 資料載入
@@ -348,7 +347,23 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
             response_mime_type="application/json"
         ),
     )
-    return json.loads(response.text)
+    result = json.loads(response.text)
+    # 強制對齊天數：截斷多餘或補齊不足的天數
+    days = result.get("days", [])
+    if len(days) > total_days:
+        result["days"] = days[:total_days]
+    elif len(days) < total_days:
+        for i in range(len(days) + 1, total_days + 1):
+            result["days"].append({
+                "day": i,
+                "spots": [{"name": f"第{i}天自由活動", "parent": "博卡拉",
+                            "search_query": "Pokhara Nepal", "duration": "彈性安排",
+                            "food": "依個人喜好", "tip": "可依當天狀況調整"}]
+            })
+    # 重新編號確保連續
+    for idx, d in enumerate(result["days"]):
+        d["day"] = idx + 1
+    return result
 
 # ============================================================
 # 6️⃣ RAG 檢索與回答生成
@@ -437,11 +452,31 @@ def _img_src(source: str, img: str) -> str:
     return img
 
 
-def _spot_card_html(spot: dict, travel_month_num: int = 0) -> str:
+def _spot_card_html(spot: dict, travel_month_num: int = 0, used_urls: set = None) -> str:
+    """
+    橫式卡片：左圖（1/3）右文（2/3），主標在整張卡片底部。
+    used_urls：同一天已使用的圖片 URL set，避免重複。
+    """
+    if used_urls is None:
+        used_urls = set()
+
     name = spot['name']
     parent = spot.get('parent', name)
     search_query = spot.get('search_query', name)
+
+    # 優先用精準 search_query 搜圖；若結果已被同天其他卡佔用則 fallback 到 parent 備援
     source, img = load_spot_image(search_query, parent)
+    if img and img in used_urls:
+        # 嘗試用 parent 換一張不同圖
+        alt_source, alt_img = load_spot_image(parent + " Nepal", parent)
+        if alt_img and alt_img not in used_urls:
+            source, img = alt_source, alt_img
+        # 若還是重複，就用佔位符
+        elif alt_img and alt_img in used_urls:
+            img = None
+
+    if img:
+        used_urls.add(img)
 
     season_warning = False
     if travel_month_num:
@@ -449,36 +484,49 @@ def _spot_card_html(spot: dict, travel_month_num: int = 0) -> str:
         if not match.empty:
             season_warning = not is_best_season(match.iloc[0]['最佳造訪季節'], travel_month_num)
 
+    # ── 圖片區塊 ──
     if img:
         src = _img_src(source, img)
-        credit = '<p style="font-size:10px;color:#999;margin:2px 4px 0;">© Wikipedia CC BY-SA</p>' if source in ('web', 'wikimedia') else ''
-        img_html = (
-            f'<img src="{src}" style="width:100%;height:150px;object-fit:cover;'
-            f'border-radius:10px 10px 0 0;display:block;">{credit}'
+        credit = (
+            '<div style="font-size:9px;color:#aaa;padding:1px 4px;'
+            'background:rgba(0,0,0,0.35);position:absolute;bottom:0;left:0;right:0;">'
+            '© Wikipedia CC BY-SA</div>'
+        ) if source in ('web', 'wikimedia') else ''
+        img_block = (
+            f'<div style="position:relative;width:120px;min-width:120px;height:100%;'
+            f'background:#ccc;border-radius:10px 0 0 10px;overflow:hidden;">'
+            f'<img src="{src}" style="width:120px;height:100%;object-fit:cover;display:block;">'
+            f'{credit}'
+            f'</div>'
         )
     else:
-        img_html = (
-            f'<div style="width:100%;height:150px;background:#D4CFC7;border-radius:10px 10px 0 0;'
-            f'display:flex;flex-direction:column;align-items:center;justify-content:center;'
-            f'color:#6B6B6B;font-size:12px;">📷<br>{name}</div>'
+        img_block = (
+            f'<div style="width:120px;min-width:120px;height:100%;background:#D4CFC7;'
+            f'border-radius:10px 0 0 10px;display:flex;flex-direction:column;'
+            f'align-items:center;justify-content:center;color:#6B6B6B;font-size:11px;">📷</div>'
         )
 
     warning_html = (
-        '<p style="margin:6px 0 0 0;color:#92650a;font-size:11px;background:#fff3cd;'
-        'padding:3px 6px;border-radius:4px;display:inline-block;">⚠️ 非最佳造訪季節</p>'
+        '<span style="color:#92650a;font-size:10px;background:#fff3cd;'
+        'padding:2px 5px;border-radius:3px;display:inline-block;margin-top:4px;">⚠️ 非最佳造訪季節</span>'
     ) if season_warning else ''
 
-    return (
-        f'<div style="min-width:210px;max-width:210px;background:#F5F0E8;'
-        f'border-radius:10px;border:1px solid #d8d0c4;flex-shrink:0;overflow:hidden;">'
-        f'{img_html}'
-        f'<div style="padding:10px 12px;">'
-        f'<p style="margin:0 0 6px 0;font-weight:bold;color:#3D5A3D;font-size:14px;">📍 {name}</p>'
-        f'<p style="margin:3px 0;color:#555;font-size:12px;">⏱️ {spot["duration"]}</p>'
-        f'<p style="margin:3px 0;color:#555;font-size:12px;">🍽️ {spot["food"]}</p>'
-        f'<p style="margin:3px 0;color:#E07B39;font-size:12px;">💡 {spot["tip"]}</p>'
+    # ── 文字區塊（右側）──
+    text_block = (
+        f'<div style="flex:1;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;min-width:0;">'
+        f'<p style="margin:0 0 6px 0;font-weight:bold;color:#3D5A3D;font-size:13px;line-height:1.4;">📍 {name}</p>'
+        f'<p style="margin:3px 0;color:#555;font-size:11px;">⏱️ {spot["duration"]}</p>'
+        f'<p style="margin:3px 0;color:#555;font-size:11px;">🍽️ {spot["food"]}</p>'
+        f'<p style="margin:3px 0;color:#E07B39;font-size:11px;">💡 {spot["tip"]}</p>'
         f'{warning_html}'
         f'</div>'
+    )
+
+    return (
+        f'<div style="display:flex;flex-direction:row;width:100%;background:#F5F0E8;'
+        f'border-radius:10px;border:1px solid #d8d0c4;overflow:hidden;min-height:110px;">'
+        f'{img_block}'
+        f'{text_block}'
         f'</div>'
     )
 
@@ -487,9 +535,13 @@ def show_itinerary_cards(itinerary_data: dict, travel_month_num: int = 0):
     for day_data in itinerary_data['days']:
         day_num = day_data['day']
         st.markdown(f"### 📅 第 {day_num} 天行程")
-        cards_html = "".join(_spot_card_html(spot, travel_month_num) for spot in day_data['spots'])
+        used_urls: set = set()
+        cards_html = "".join(
+            _spot_card_html(spot, travel_month_num, used_urls)
+            for spot in day_data['spots']
+        )
         st.markdown(
-            f'<div style="display:flex;overflow-x:auto;gap:16px;padding:4px 2px 16px 2px;">'
+            f'<div style="display:flex;flex-direction:column;gap:10px;padding:4px 2px 16px 2px;">'
             f'{cards_html}'
             f'</div>',
             unsafe_allow_html=True,
@@ -568,7 +620,8 @@ def extract_trip_params(history: list) -> dict:
 {{
   "trip_type": "冒險健行 或 文化宗教 或 自然生態 或 null",
   "companion": "個人獨旅 或 情侶同遊 或 親子同遊 或 長輩同行 或 null",
-  "travel_month": "X月 格式（如 10月）或 null"
+  "travel_month": "X月 格式（如 10月）或 null",
+  "days": "整數天數（如旅客提到幾天、幾日遊等，提取數字）或 null"
 }}"""
     try:
         response = client.models.generate_content(
@@ -618,112 +671,144 @@ with st.sidebar:
         st.rerun()
 
 # ============================================================
-# 主畫面：行程卡片 → 地圖 → 聊天
+# 主畫面：左欄=聊天，右欄=行程
 # ============================================================
-if st.session_state.itinerary:
-    show_itinerary_cards(st.session_state.itinerary, st.session_state.itinerary_month_num)
-    show_map(st.session_state.itinerary)
-    st.markdown("---")
-
-st.markdown("### 💬 旅遊問答")
-
-for message in st.session_state.conversation_history:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# ── 確認卡片：AI 偵測到規劃意圖後出現 ──────────────────────────
-if st.session_state.show_confirmation:
-    params = st.session_state.extracted_params
-    companion_label  = params.get('companion')  or '未指定'
-    trip_type_label  = params.get('trip_type')  or '綜合推薦'
-    month_label      = params.get('travel_month') or '未指定'
-
-    with st.container(border=True):
-        st.markdown("### 🗺️ 我已掌握您的旅程輪廓！")
-        st.markdown(f"**{companion_label}・{trip_type_label}・{month_label}出發**")
-        st.caption("天數與景點確認後，即可生成您的專屬行程。")
-
-        confirm_days = st.number_input(
-            "行程天數", min_value=1, max_value=14, value=3, step=1, key="confirm_days"
-        )
-        confirm_must = st.multiselect(
-            "指定景點（選填）", df['景點名稱_中文'].tolist(), key="confirm_must"
-        )
-
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            if st.button("✨ 為我生成專屬行程", type="primary", use_container_width=True):
-                final_trip_type = params.get('trip_type') or '文化宗教'
-                final_companion  = params.get('companion')  or '個人獨旅'
-                final_month      = params.get('travel_month') or ''
-                month_num = int(final_month.replace("月", "")) if final_month and '月' in final_month else 0
-                with st.spinner("✈️ 旅伴正在為您打包行程…"):
-                    try:
-                        result = generate_itinerary(
-                            final_trip_type, int(confirm_days), final_month, final_companion,
-                            st.session_state.conversation_history,
-                            confirm_must,
-                        )
-                        st.session_state.itinerary = result
-                        st.session_state.itinerary_month_num = month_num
-                        st.session_state.show_confirmation = False
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"行程生成失敗：{e}")
-        with col2:
-            if st.button("繼續聊聊", use_container_width=True):
-                st.session_state.show_confirmation = False
-                st.rerun()
-
-
 def log_trend(emotion_label):
     st.session_state.emotion_log.append(emotion_label)
     st.session_state.trend_counter = Counter(st.session_state.emotion_log)
     return st.session_state.trend_counter
 
 
-if query := st.chat_input("詢問旅遊建議，或說「幫我規劃行程」…"):
-    if not wants_itinerary(query):
-        st.session_state.show_confirmation = False
+col_chat, col_itinerary = st.columns([1, 1], gap="large")
 
-    st.session_state.conversation_history.append({
-        "role": "user", "content": query, "query": query
-    })
+# ──────────────── 左欄：聊天 ────────────────
+with col_chat:
+    st.markdown("### 💬 旅遊問答")
 
-    with st.chat_message("user"):
-        st.markdown(query)
+    # 對話歷史
+    for message in st.session_state.conversation_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-    with st.chat_message("assistant"):
-        with st.spinner("ChatBot 正在思考..."):
-            try:
-                docs = retrieve(query)
-                answer = generate_answer(query, docs, st.session_state.conversation_history)
-                emotion_label, score = analyze_emotion(answer)
-                trend = log_trend(emotion_label)
-                source_names = docs['景點名稱_中文'].tolist()
+    # ── 確認卡片：AI 偵測到規劃意圖後出現 ──
+    if st.session_state.show_confirmation:
+        params = st.session_state.extracted_params
 
-                st.session_state.conversation_history.append({
-                    "role": "assistant",
-                    "content": answer,
-                    "answer": answer,
-                    "emotion_label": emotion_label,
-                    "emotion_score": score,
-                    "source": source_names,
-                    "trend_snapshot": dict(trend),
-                })
+        # AI 判讀結果作為預設值
+        TRIP_TYPE_OPTIONS = ["冒險健行", "文化宗教", "自然生態"]
+        COMPANION_OPTIONS = ["個人獨旅", "情侶同遊", "親子同遊", "長輩同行"]
 
-                st.markdown(answer)
+        ai_trip_type = params.get('trip_type') or "文化宗教"
+        ai_companion = params.get('companion') or "個人獨旅"
+        ai_month     = params.get('travel_month') or ''
 
-            except Exception as e:
-                st.error(f"ChatBot 發生錯誤：{e}")
-                st.session_state.conversation_history.append({
-                    "role": "assistant",
-                    "content": f"ChatBot 發生錯誤：{e}",
-                    "error": str(e),
-                })
+        # 解析 AI 判讀天數，預設 3
+        ai_days_raw = params.get('days')
+        try:
+            ai_days = int(ai_days_raw) if ai_days_raw else 3
+            ai_days = max(1, min(14, ai_days))
+        except (ValueError, TypeError):
+            ai_days = 3
 
-    if wants_itinerary(query):
-        params = extract_trip_params(st.session_state.conversation_history)
-        st.session_state.extracted_params = params
-        st.session_state.show_confirmation = True
-        st.rerun()
+        trip_type_idx = TRIP_TYPE_OPTIONS.index(ai_trip_type) if ai_trip_type in TRIP_TYPE_OPTIONS else 1
+        companion_idx = COMPANION_OPTIONS.index(ai_companion) if ai_companion in COMPANION_OPTIONS else 0
+
+        with st.container(border=True):
+            st.markdown("### 🗺️ 我已掌握您的旅程輪廓！")
+            st.caption("以下為 AI 根據對話判讀的偏好，您可直接調整後生成行程。")
+
+            confirm_trip_type = st.selectbox(
+                "旅遊偏好", TRIP_TYPE_OPTIONS, index=trip_type_idx, key="confirm_trip_type"
+            )
+            confirm_companion = st.selectbox(
+                "旅伴類型", COMPANION_OPTIONS, index=companion_idx, key="confirm_companion"
+            )
+            confirm_month = st.text_input(
+                "出發月份（如：10月）", value=ai_month, key="confirm_month"
+            )
+            confirm_days = st.number_input(
+                "行程天數", min_value=1, max_value=14, value=ai_days, step=1, key="confirm_days"
+            )
+            confirm_must = st.multiselect(
+                "指定景點（選填）", df['景點名稱_中文'].tolist(), key="confirm_must"
+            )
+
+            btn_col1, btn_col2 = st.columns([2, 1])
+            with btn_col1:
+                if st.button("✨ 為我生成專屬行程", type="primary", use_container_width=True):
+                    final_month = confirm_month.strip()
+                    month_num = int(final_month.replace("月", "")) if final_month and '月' in final_month else 0
+                    with st.spinner("✈️ 旅伴正在為您打包行程…"):
+                        try:
+                            result = generate_itinerary(
+                                confirm_trip_type, int(confirm_days), final_month, confirm_companion,
+                                st.session_state.conversation_history,
+                                confirm_must,
+                            )
+                            st.session_state.itinerary = result
+                            st.session_state.itinerary_month_num = month_num
+                            st.session_state.show_confirmation = False
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"行程生成失敗：{e}")
+            with btn_col2:
+                if st.button("繼續聊聊", use_container_width=True):
+                    st.session_state.show_confirmation = False
+                    st.rerun()
+
+    # chat_input 必須在欄外才能固定底部（Streamlit 限制：放欄內也可運作）
+    if query := st.chat_input("詢問旅遊建議，或說「幫我規劃行程」…"):
+        if not wants_itinerary(query):
+            st.session_state.show_confirmation = False
+
+        st.session_state.conversation_history.append({
+            "role": "user", "content": query, "query": query
+        })
+
+        with st.chat_message("user"):
+            st.markdown(query)
+
+        with st.chat_message("assistant"):
+            with st.spinner("ChatBot 正在思考..."):
+                try:
+                    docs = retrieve(query)
+                    answer = generate_answer(query, docs, st.session_state.conversation_history)
+                    emotion_label, score = analyze_emotion(answer)
+                    trend = log_trend(emotion_label)
+                    source_names = docs['景點名稱_中文'].tolist()
+
+                    st.session_state.conversation_history.append({
+                        "role": "assistant",
+                        "content": answer,
+                        "answer": answer,
+                        "emotion_label": emotion_label,
+                        "emotion_score": score,
+                        "source": source_names,
+                        "trend_snapshot": dict(trend),
+                    })
+
+                    st.markdown(answer)
+
+                except Exception as e:
+                    st.error(f"ChatBot 發生錯誤：{e}")
+                    st.session_state.conversation_history.append({
+                        "role": "assistant",
+                        "content": f"ChatBot 發生錯誤：{e}",
+                        "error": str(e),
+                    })
+
+        if wants_itinerary(query):
+            params = extract_trip_params(st.session_state.conversation_history)
+            st.session_state.extracted_params = params
+            st.session_state.show_confirmation = True
+            st.rerun()
+
+# ──────────────── 右欄：行程 ────────────────
+with col_itinerary:
+    if st.session_state.itinerary:
+        st.markdown("### 🗓️ 您的專屬行程")
+        show_itinerary_cards(st.session_state.itinerary, st.session_state.itinerary_month_num)
+        show_map(st.session_state.itinerary)
+    else:
+        st.markdown("### 🗓️ 專屬行程")
+        st.info("行程將在此顯示。先和旅伴聊聊，說「幫我規劃行程」即可生成！")
