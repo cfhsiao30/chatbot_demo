@@ -27,91 +27,53 @@ st.set_page_config(layout="wide", page_title="尼泊爾旅遊設計師")
 
 st.markdown("""
 <style>
-/* ── 全域 reset ── */
-html, body, [data-testid="stAppViewContainer"] {
-    height: 100vh;
-    overflow: hidden;
-}
-[data-testid="stAppViewContainer"] > div:first-child {
-    height: 100vh;
-    overflow: hidden;
-}
-
-/* ── 頂部 header 隱藏多餘空白 ── */
+/* ── 隱藏預設 header 空白 ── */
 [data-testid="stHeader"] { display: none; }
 .main > div { padding-top: 0 !important; }
+[data-testid="stMainBlockContainer"] { padding-top: 12px !important; }
 
-/* ── 左右雙欄容器：撐滿視窗高度 ── */
-[data-testid="column"]:first-child {
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    border-right: 1px solid #e5e5e5;
-    padding: 0 !important;
-}
+/* ── 右欄背景 ── */
 [data-testid="column"]:last-child {
-    height: 100vh;
-    overflow-y: auto;
-    padding: 16px 20px !important;
     background: #fafaf9;
 }
 
-/* ── 左欄：對話歷史區捲動 ── */
-.chat-history-scroll {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px 16px 8px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    scrollbar-width: thin;
-    scrollbar-color: #d1d5db transparent;
-}
-.chat-history-scroll::-webkit-scrollbar { width: 5px; }
-.chat-history-scroll::-webkit-scrollbar-thumb {
-    background: #d1d5db; border-radius: 3px;
-}
-
-/* ── 左欄 header ── */
-.chat-header {
-    padding: 16px 20px 12px 20px;
-    border-bottom: 1px solid #e5e5e5;
-    background: white;
-    flex-shrink: 0;
-}
-.chat-header h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #1a1a1a;
-}
-
-/* ── 輸入框固定在左欄底部 ── */
-.chat-input-wrapper {
-    flex-shrink: 0;
-    padding: 10px 12px;
-    border-top: 1px solid #e5e5e5;
-    background: white;
-}
-
-/* ── chat_input 強制貼底 ── */
-[data-testid="stChatInput"] {
-    position: static !important;
-    border-radius: 12px !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
-}
-
-/* ── 行程小卡 ── */
+/* ── 進度條綠色 ── */
 div[data-testid="stProgressBar"] > div > div > div {
     background-color: #5B8A5B !important;
 }
 
-/* ── 右欄 scrollbar ── */
-[data-testid="column"]:last-child::-webkit-scrollbar { width: 5px; }
-[data-testid="column"]:last-child::-webkit-scrollbar-thumb {
-    background: #d1d5db; border-radius: 3px;
+/* ── 輸入框樣式 ── */
+.stForm [data-testid="stTextArea"] textarea {
+    border-radius: 10px !important;
+    border: 1.5px solid #d1d5db !important;
+    resize: none !important;
+    font-size: 14px !important;
+    line-height: 1.5 !important;
 }
+.stForm [data-testid="stTextArea"] textarea:focus {
+    border-color: #5B8A5B !important;
+    box-shadow: 0 0 0 2px rgba(91,138,91,0.15) !important;
+}
+
+/* ── 送出按鈕 ── */
+.stForm [data-testid="stFormSubmitButton"] button {
+    background: #5B8A5B !important;
+    color: white !important;
+    border-radius: 8px !important;
+    border: none !important;
+    font-weight: 600 !important;
+}
+.stForm [data-testid="stFormSubmitButton"] button:hover {
+    background: #4a7a4a !important;
+}
+
+/* ── 對話歷史捲動容器內的 chat_message 間距 ── */
+[data-testid="stVerticalBlock"] [data-testid="stChatMessage"] {
+    padding: 4px 0 !important;
+}
+
+/* ── 全域 chat_input 隱藏（改用 form）── */
+[data-testid="stChatInput"] { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -693,30 +655,45 @@ def log_trend(emotion_label):
 # ============================================================
 # 🔟 主畫面：Claude.ai 風格雙欄版面
 # ============================================================
-col_left, col_right = st.columns(2, gap="small")
+col_left, col_right = st.columns(2, gap="medium")
 
 # ══════════════════════════════════════════════════════════════
-# 左欄：對話區（上方捲動歷史 + 底部輸入框）
+# 左欄：對話區
+# 上：st.container(height=) 捲動歷史  /  下：st.form 輸入框
 # ══════════════════════════════════════════════════════════════
 with col_left:
-    # Header
     st.markdown(
-        '<div class="chat-header"><h3>🏔️ 尼泊爾旅遊設計師</h3>'
-        '<p style="margin:4px 0 0 0;font-size:12px;color:#888;">與 AI 旅伴聊聊，說「幫我規劃行程」即可生成行程</p></div>',
-        unsafe_allow_html=True
+        "### 🏔️ 尼泊爾旅遊設計師\n"
+        "<p style='font-size:12px;color:#888;margin:-8px 0 8px 0;'>"
+        "與 AI 旅伴聊聊，說「幫我規劃行程」即可生成行程</p>",
+        unsafe_allow_html=True,
     )
 
-    # 對話歷史（捲動區）
-    st.markdown('<div class="chat-history-scroll" id="chat-history">', unsafe_allow_html=True)
-    for message in st.session_state.conversation_history:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    st.markdown('</div>', unsafe_allow_html=True)
+    # ── 對話歷史：原生捲動容器 ──────────────────────────────
+    history_box = st.container(height=520, border=False)
+    with history_box:
+        if not st.session_state.conversation_history:
+            st.markdown(
+                "<div style='text-align:center;color:#bbb;padding:60px 0;font-size:13px;'>"
+                "🌏 還沒有對話紀錄<br>在下方輸入框開始聊聊吧！</div>",
+                unsafe_allow_html=True,
+            )
+        for message in st.session_state.conversation_history:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
-    # 輸入框（固定底部）
-    st.markdown('<div class="chat-input-wrapper">', unsafe_allow_html=True)
-    query = st.chat_input("詢問旅遊建議，或說「幫我規劃行程」…")
-    st.markdown('</div>', unsafe_allow_html=True)
+    # ── 輸入框：st.form 確保在欄位底部 ─────────────────────
+    st.divider()
+    with st.form(key="chat_form", clear_on_submit=True):
+        user_input = st.text_area(
+            label="",
+            placeholder="詢問旅遊建議，或說「幫我規劃行程」…\n（Shift+Enter 換行，按送出送出）",
+            height=90,
+            label_visibility="collapsed",
+        )
+        submitted = st.form_submit_button("送出 ➤", use_container_width=True)
+
+    query = user_input.strip() if submitted and user_input.strip() else None
 
     if query:
         if not wants_itinerary(query):
@@ -726,43 +703,37 @@ with col_left:
             "role": "user", "content": query, "query": query
         })
 
-        # 即時顯示 user 訊息（會在下次 rerun 後出現在歷史區）
-        with st.chat_message("user"):
-            st.markdown(query)
+        with st.spinner("AI 旅伴正在思考..."):
+            try:
+                docs = retrieve(query)
+                answer = generate_answer(query, docs, st.session_state.conversation_history)
+                emotion_label, score = analyze_emotion(answer)
+                trend = log_trend(emotion_label)
+                source_names = docs['景點名稱_中文'].tolist()
 
-        with st.chat_message("assistant"):
-            with st.spinner("ChatBot 正在思考..."):
-                try:
-                    docs = retrieve(query)
-                    answer = generate_answer(query, docs, st.session_state.conversation_history)
-                    emotion_label, score = analyze_emotion(answer)
-                    trend = log_trend(emotion_label)
-                    source_names = docs['景點名稱_中文'].tolist()
+                st.session_state.conversation_history.append({
+                    "role": "assistant",
+                    "content": answer,
+                    "answer": answer,
+                    "emotion_label": emotion_label,
+                    "emotion_score": score,
+                    "source": source_names,
+                    "trend_snapshot": dict(trend),
+                })
 
-                    st.session_state.conversation_history.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "answer": answer,
-                        "emotion_label": emotion_label,
-                        "emotion_score": score,
-                        "source": source_names,
-                        "trend_snapshot": dict(trend),
-                    })
-                    st.markdown(answer)
-
-                except Exception as e:
-                    st.error(f"ChatBot 發生錯誤：{e}")
-                    st.session_state.conversation_history.append({
-                        "role": "assistant",
-                        "content": f"ChatBot 發生錯誤：{e}",
-                        "error": str(e),
-                    })
+            except Exception as e:
+                st.session_state.conversation_history.append({
+                    "role": "assistant",
+                    "content": f"ChatBot 發生錯誤：{e}",
+                    "error": str(e),
+                })
 
         if wants_itinerary(query):
             params = extract_trip_params(st.session_state.conversation_history)
             st.session_state.extracted_params = params
             st.session_state.show_confirmation = True
-            st.rerun()
+
+        st.rerun()
 
 # ══════════════════════════════════════════════════════════════
 # 右欄：行程面板（捲動）
