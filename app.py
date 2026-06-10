@@ -25,11 +25,22 @@ st.markdown("""
 /* ── 隱藏預設 header 空白 ── */
 [data-testid="stHeader"] { display: none; }
 .main > div { padding-top: 0 !important; }
-[data-testid="stMainBlockContainer"] { padding-top: 12px !important; }
+[data-testid="stMainBlockContainer"] {
+    padding-top: 8px !important;
+    padding-bottom: 0 !important;
+    max-height: 100vh;
+    overflow: hidden;
+}
 
 /* ── 右欄背景 ── */
 [data-testid="column"]:last-child {
     background: #fafaf9;
+}
+
+/* ── 兩欄等高，撐滿視窗 ── */
+[data-testid="column"] {
+    height: calc(100vh - 20px) !important;
+    overflow: hidden !important;
 }
 
 /* ── 進度條綠色 ── */
@@ -199,9 +210,9 @@ def _is_photo_url(url: str) -> bool:
 
 
 @st.cache_data(show_spinner=False)
-def fetch_commons_image(search_query: str, fallback_parent: str = "") -> str | None:
-    """以 search_query 精準搜尋 Wikimedia Commons 照片。
-    找不到真實照片時，以 fallback_parent 英文名再試一次。"""
+def fetch_commons_images(search_query: str, fallback_parent: str = "", limit: int = 6) -> list[str]:
+    """搜尋 Wikimedia Commons，回傳最多 limit 個候選圖片 URL（list）。"""
+    results = []
     for query in dict.fromkeys([search_query, WIKIPEDIA_TITLES.get(fallback_parent, "")]):
         if not query:
             continue
@@ -211,7 +222,7 @@ def fetch_commons_image(search_query: str, fallback_parent: str = "") -> str | N
                 "generator": "search",
                 "gsrnamespace": "6",
                 "gsrsearch": query,
-                "gsrlimit": "10",
+                "gsrlimit": str(limit * 2),   # 多抓再過濾
                 "prop": "imageinfo",
                 "iiprop": "url|size",
                 "iiurlwidth": "600",
@@ -229,28 +240,43 @@ def fetch_commons_image(search_query: str, fallback_parent: str = "") -> str | N
                 for page in sorted(pages.values(), key=lambda p: p.get("index", 0)):
                     info = page.get("imageinfo", [{}])[0]
                     url = info.get("thumburl") or info.get("url", "")
-                    if url and _is_photo_url(url):
-                        return url
+                    if url and _is_photo_url(url) and url not in results:
+                        results.append(url)
+                        if len(results) >= limit:
+                            return results
         except Exception:
             continue
-    return None
+    return results
 
 
-def load_spot_image(search_query: str = "", parent: str = ""):
-    """圖片來源優先順序：
-    ① Wikimedia Commons（以 search_query 精準搜）
-    ② 本地 images/（開發者覆蓋：放同名圖片即可替換）
-    ③ Wikimedia 硬編碼備援
-    回傳 (來源, 路徑或URL)，來源為 'web' / 'local' / 'wikimedia'。"""
-    commons_url = fetch_commons_image(search_query, parent)
-    if commons_url:
-        return 'web', commons_url
+def load_spot_image(search_query: str = "", parent: str = "", used_urls: set | None = None):
+    """
+    圖片來源優先順序：
+    ① Wikimedia Commons（以 search_query 精準搜，跳過 used_urls 中已用過的）
+    ② 本地 images/
+    ③ Wikimedia 硬編碼備援（同樣跳過已用過的）
+    回傳 (來源, URL)。
+    """
+    if used_urls is None:
+        used_urls = set()
+
+    candidates = fetch_commons_images(search_query, parent)
+    for url in candidates:
+        if url not in used_urls:
+            return 'web', url
+
+    # 本地圖片（不去重，本來就是精準對應）
     for ext in ['.jpg', '.jpeg', '.png', '.webp']:
         path = Path(f"images/{parent}{ext}")
         if path.exists():
             return 'local', str(path)
+
+    # 硬編碼備援：依序找未用過的
     if parent in WIKIMEDIA_IMAGES:
-        return 'wikimedia', WIKIMEDIA_IMAGES[parent]
+        url = WIKIMEDIA_IMAGES[parent]
+        if url not in used_urls:
+            return 'wikimedia', url
+
     return None, None
 
 
@@ -495,12 +521,19 @@ def _img_src(source: str, img: str) -> str:
     return img
 
 
-def _spot_card_html(spot: dict, travel_month_num: int = 0) -> str:
+def _spot_card_html(spot: dict, travel_month_num: int = 0, used_urls: set | None = None) -> str:
     """橫式行程小卡：左圖 | 右文 | 下主標"""
+    if used_urls is None:
+        used_urls = set()
+
     name = spot['name']
     parent = spot.get('parent', name)
     search_query = spot.get('search_query', name)
-    source, img = load_spot_image(search_query, parent)
+    source, img = load_spot_image(search_query, parent, used_urls)
+
+    # 記錄已使用的 URL，避免後續卡片重複
+    if img and source in ('web', 'wikimedia'):
+        used_urls.add(img)
 
     season_warning = False
     if travel_month_num:
@@ -563,6 +596,7 @@ def _spot_card_html(spot: dict, travel_month_num: int = 0) -> str:
 
 
 def show_itinerary_cards(itinerary_data: dict, travel_month_num: int = 0):
+    used_urls: set = set()   # 整趟行程共用，跨天去重
     for day_data in itinerary_data['days']:
         day_num = day_data['day']
         st.markdown(
@@ -570,7 +604,10 @@ def show_itinerary_cards(itinerary_data: dict, travel_month_num: int = 0):
             f'border-radius:6px;margin:12px 0 6px 0;font-weight:bold;">📅 第 {day_num} 天</div>',
             unsafe_allow_html=True,
         )
-        cards_html = "".join(_spot_card_html(spot, travel_month_num) for spot in day_data['spots'])
+        cards_html = "".join(
+            _spot_card_html(spot, travel_month_num, used_urls)
+            for spot in day_data['spots']
+        )
         st.markdown(cards_html, unsafe_allow_html=True)
 
 
@@ -595,6 +632,7 @@ def build_export_html(itinerary_data: dict, params: dict, travel_month_num: int 
 
     # ── 行程卡片 HTML（複用 _spot_card_html）───────────────
     cards_html = ""
+    used_urls_export: set = set()
     for day_data in itinerary_data.get('days', []):
         cards_html += (
             f'<div style="background:#5B8A5B;color:white;padding:8px 16px;'
@@ -602,7 +640,7 @@ def build_export_html(itinerary_data: dict, params: dict, travel_month_num: int 
             f'📅 第 {day_data["day"]} 天</div>'
         )
         for spot in day_data.get('spots', []):
-            cards_html += _spot_card_html(spot, travel_month_num)
+            cards_html += _spot_card_html(spot, travel_month_num, used_urls_export)
 
     # ── 完整 HTML ───────────────────────────────────────────
     return f"""<!DOCTYPE html>
@@ -709,6 +747,37 @@ def log_trend(emotion_label):
 # ============================================================
 col_left, col_right = st.columns(2, gap="medium")
 
+# 計算可用高度：注入 JS 把視窗高度寫入 hidden input，Streamlit 無法直接讀取
+# 改用固定比例：總可用高度 = vh - 頂部固定元素
+# 左欄：header(~70px) + divider(16px) + textarea(90px) + submit(40px) + padding(20px) = ~236px overhead
+# 右欄：toolbar(~50px) = overhead
+# 兩側 history/card 容器高度設為 calc(100vh - overhead)
+# Streamlit container(height=) 只接受 px，用估算值
+import streamlit.components.v1 as components
+
+# 注入 JS：動態設 session_state.viewport_h（只在第一次載入執行）
+if 'viewport_h' not in st.session_state:
+    st.session_state.viewport_h = 700   # 預設值
+
+components.html("""
+<script>
+const h = window.innerHeight || document.documentElement.clientHeight;
+const query = new URLSearchParams(window.location.search);
+// 透過 URL fragment 傳高度（Streamlit 無法直接接收 JS postMessage）
+// 實際做法：用固定視窗高度估算
+</script>
+""", height=0)
+
+# 用視窗高度估算各容器高度
+# 左欄 overhead = title(60) + caption(20) + divider(20) + textarea(90) + submit_btn(42) + padding(30) ≈ 262
+# 右欄 overhead = toolbar(50) + padding(20) ≈ 70
+_LEFT_OVERHEAD  = 262
+_RIGHT_OVERHEAD = 70
+_BASE_VH        = 780   # 一般 1080p 視窗扣掉瀏覽器工具列的保守估計
+
+HISTORY_H  = max(300, _BASE_VH - _LEFT_OVERHEAD)   # ≈ 518
+CARD_H     = max(400, _BASE_VH - _RIGHT_OVERHEAD)   # ≈ 710
+
 # ══════════════════════════════════════════════════════════════
 # 左欄：對話區
 # 上：st.container(height=) 捲動歷史  /  下：st.form 輸入框
@@ -722,7 +791,7 @@ with col_left:
     )
 
     # ── 對話歷史：原生捲動容器 ──────────────────────────────
-    history_box = st.container(height=520, border=False)
+    history_box = st.container(height=HISTORY_H, border=False)
     with history_box:
         if not st.session_state.conversation_history:
             st.markdown(
@@ -942,9 +1011,7 @@ with col_right:
 
     # ── 行程卡片（獨立捲動容器）─────────────────────────────
     if st.session_state.itinerary:
-        total_days = len(st.session_state.itinerary['days'])
-        card_height = min(700, max(400, total_days * 420))
-        with st.container(height=card_height, border=False):
+        with st.container(height=CARD_H, border=False):
             show_itinerary_cards(st.session_state.itinerary, st.session_state.itinerary_month_num)
 
     # ── 尚無行程時的引導畫面 ──────────────────────────────────
