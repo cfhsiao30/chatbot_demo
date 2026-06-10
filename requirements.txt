@@ -9,3 +9,4 @@ google-genai
 folium
 streamlit-folium
 requests
+folium>=0.14.0
