@@ -775,8 +775,8 @@ _LEFT_OVERHEAD  = 262
 _RIGHT_OVERHEAD = 70
 _BASE_VH        = 780   # 一般 1080p 視窗扣掉瀏覽器工具列的保守估計
 
-HISTORY_H  = max(300, _BASE_VH - _LEFT_OVERHEAD)   # ≈ 518
-CARD_H     = max(400, _BASE_VH - _RIGHT_OVERHEAD)   # ≈ 710
+HISTORY_H  = 360
+CARD_H     = 360 + (_LEFT_OVERHEAD - _RIGHT_OVERHEAD)  # 360 + (262-70) = 552
 
 # ══════════════════════════════════════════════════════════════
 # 左欄：對話區
@@ -795,8 +795,10 @@ with col_left:
     with history_box:
         if not st.session_state.conversation_history:
             st.markdown(
-                "<div style='text-align:center;color:#bbb;padding:60px 0;font-size:13px;'>"
-                "🌏 還沒有對話紀錄<br>在下方輸入框開始聊聊吧！</div>",
+                f"<div style='display:flex;flex-direction:column;align-items:center;"
+                f"justify-content:center;height:{HISTORY_H - 20}px;text-align:center;"
+                f"color:#bbb;font-size:13px;'>"
+                f"🌏 還沒有對話紀錄<br>在下方輸入框開始聊聊吧！</div>",
                 unsafe_allow_html=True,
             )
         for message in st.session_state.conversation_history:
