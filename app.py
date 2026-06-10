@@ -13,12 +13,7 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-try:
-    import folium
-    from streamlit_folium import st_folium
-    HAS_FOLIUM = True
-except ImportError:
-    HAS_FOLIUM = False
+import base64
 
 # ============================================================
 # 頁面設定
@@ -579,240 +574,73 @@ def show_itinerary_cards(itinerary_data: dict, travel_month_num: int = 0):
         st.markdown(cards_html, unsafe_allow_html=True)
 
 
-# ============================================================
-# 8️⃣ 交通時間表（硬編碼，雙向對稱）
-# ============================================================
-# key: frozenset({景點A所屬區域, 景點B所屬區域})
-# 區域對應見 SPOT_REGION
-
-SPOT_REGION = {
-    # 加德滿都谷地
-    "斯瓦揚布佛塔":         "加德滿都",
-    "帕舒帕提那寺":         "加德滿都",
-    "巴克塔普爾杜巴廣場":   "巴克塔普爾",
-    "帕坦杜巴廣場":         "帕坦",
-    "博達拿佛塔":           "加德滿都",
-    "納加闊特":             "納加闊特",
-    "錢德拉吉里山":         "加德滿都",
-    # 博卡拉區
-    "博卡拉":               "博卡拉",
-    "薩朗科特":             "博卡拉",
-    "安娜普納基地營":       "博卡拉",
-    "費瓦湖":               "博卡拉",
-    # 奇特旺
-    "奇特旺國家公園":       "奇特旺",
-    # 藍毗尼
-    "藍毗尼":               "藍毗尼",
-    # 聖母峰
-    "聖母峰基地營健行":     "盧卡拉",
-    "朗塘國家公園":         "朗塘",
-    # 偏遠
-    "巴迪亞國家公園":       "巴迪亞",
-    "木斯塘":               "木斯塘",
-    "上木斯塘":             "木斯塘",
-}
-
-# frozenset(區域A, 區域B) → {mode, time, alt(可選)}
-_T = {
-    # ── 加德滿都谷地內 ──────────────────────────────────────
-    frozenset({"加德滿都", "巴克塔普爾"}):  {"mode": "🚌 巴士／計程車", "time": "45–60 分鐘"},
-    frozenset({"加德滿都", "帕坦"}):        {"mode": "🚌 計程車", "time": "20–30 分鐘"},
-    frozenset({"加德滿都", "納加闊特"}):    {"mode": "🚗 計程車", "time": "約 1.5 小時"},
-    frozenset({"巴克塔普爾", "納加闊特"}):  {"mode": "🚗 計程車", "time": "約 1 小時"},
-    frozenset({"加德滿都", "帕坦"}):        {"mode": "🚌 計程車", "time": "20–30 分鐘"},
-    frozenset({"帕坦", "巴克塔普爾"}):      {"mode": "🚌 計程車", "time": "約 40 分鐘"},
-
-    # ── 加德滿都 ↔ 其他城市 ────────────────────────────────
-    frozenset({"加德滿都", "博卡拉"}):
-        {"mode": "✈️ 飛機（推薦）", "time": "約 35 分鐘", "alt": "巴士約 7–8 小時"},
-    frozenset({"加德滿都", "奇特旺"}):
-        {"mode": "🚌 巴士／車", "time": "約 4–5 小時"},
-    frozenset({"加德滿都", "藍毗尼"}):
-        {"mode": "🚌 巴士／車", "time": "約 6–7 小時"},
-    frozenset({"加德滿都", "盧卡拉"}):
-        {"mode": "✈️ 飛機", "time": "約 35 分鐘", "alt": "無陸路直達"},
-    frozenset({"加德滿都", "朗塘"}):
-        {"mode": "🚌 巴士＋健行", "time": "巴士約 7 小時 → 健行起點"},
-    frozenset({"加德滿都", "巴迪亞"}):
-        {"mode": "✈️ 飛機至尼泊甘傑", "time": "約 1 小時＋車 3 小時"},
-    frozenset({"加德滿都", "木斯塘"}):
-        {"mode": "✈️ 飛機至博卡拉＋轉機", "time": "約 1.5 小時"},
-
-    # ── 博卡拉 ↔ 其他 ───────────────────────────────────────
-    frozenset({"博卡拉", "奇特旺"}):
-        {"mode": "🚌 巴士／車", "time": "約 4–5 小時"},
-    frozenset({"博卡拉", "藍毗尼"}):
-        {"mode": "🚌 巴士／車", "time": "約 5–6 小時"},
-    frozenset({"博卡拉", "盧卡拉"}):
-        {"mode": "✈️ 飛機（經加德滿都）", "time": "約 1.5 小時"},
-    frozenset({"博卡拉", "木斯塘"}):
-        {"mode": "✈️ 飛機至Jomsom", "time": "約 25 分鐘"},
-    frozenset({"博卡拉", "巴迪亞"}):
-        {"mode": "🚌 巴士／車", "time": "約 8–9 小時"},
-
-    # ── 奇特旺 ↔ 其他 ───────────────────────────────────────
-    frozenset({"奇特旺", "藍毗尼"}):
-        {"mode": "🚌 巴士／車", "time": "約 3–4 小時"},
-    frozenset({"奇特旺", "巴迪亞"}):
-        {"mode": "🚌 巴士／車", "time": "約 8 小時"},
-
-    # ── 谷地內同區視為步行或短程車 ─────────────────────────
-    frozenset({"加德滿都", "加德滿都"}):    {"mode": "🚶 步行／計程車", "time": "10–30 分鐘"},
-    frozenset({"博卡拉", "博卡拉"}):        {"mode": "🚶 步行／計程車", "time": "10–20 分鐘"},
-}
-
-def get_transport(name_a: str, name_b: str) -> dict:
-    """根據景點名稱查交通資訊，找不到回傳預設。"""
-    region_a = SPOT_REGION.get(name_a, name_a)
-    region_b = SPOT_REGION.get(name_b, name_b)
-    key = frozenset({region_a, region_b})
-    return _T.get(key, {"mode": "🚗 陸路", "time": "時間依路況而定"})
-
 
 # ============================================================
-# 8️⃣ 互動地圖（AntPath 串接 + 交通時間）
+# 8️⃣ 匯出：自包含 HTML（喜好摘要 + 行程小卡 + base64 圖片）
 # ============================================================
-def show_map(itinerary_data: dict):
-    st.markdown("### 🗺️ 行程地圖")
+def build_export_html(itinerary_data: dict, params: dict, travel_month_num: int = 0) -> str:
+    """生成可離線瀏覽的自包含 HTML 字串。"""
 
-    if not HAS_FOLIUM:
-        st.warning("請安裝地圖套件：`pip install folium streamlit-folium`")
-        return
+    # ── 喜好摘要區塊 ────────────────────────────────────────
+    companion  = params.get('companion')  or params.get('confirm_companion') or '未指定'
+    trip_type  = params.get('trip_type')  or params.get('confirm_trip_type') or '未指定'
+    month      = params.get('travel_month') or '未指定'
+    days_count = len(itinerary_data.get('days', []))
 
-    try:
-        from folium.plugins import AntPath
-        HAS_ANTPATH = True
-    except ImportError:
-        HAS_ANTPATH = False
-
-    # 收集所有景點（含座標），用 parent 對應
-    all_spots = []
-    for day_data in itinerary_data['days']:
-        for spot in day_data['spots']:
-            # 先嘗試用 parent 找座標，再用 name
-            for key in [spot.get('parent', ''), spot.get('name', '')]:
-                match = df[df['景點名稱_中文'] == key]
-                if not match.empty:
-                    row = match.iloc[0]
-                    all_spots.append({
-                        'name':   spot['name'],
-                        'parent': spot.get('parent', spot['name']),
-                        'lat':    float(row['lat']),
-                        'lng':    float(row['lng']),
-                        'day':    day_data['day'],
-                    })
-                    break
-
-    if not all_spots:
-        st.info("找不到行程景點的地理座標。")
-        return
-
-    center_lat = sum(s['lat'] for s in all_spots) / len(all_spots)
-    center_lng = sum(s['lng'] for s in all_spots) / len(all_spots)
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=7,
-                   tiles="CartoDB positron")
-
-    # 每天一個顏色
-    DAY_COLORS  = ['#2E8B57','#1E6FA8','#C0392B','#7D3C98','#D35400','#17A589','#B7950B']
-    MARKER_COLS = ['green',  'blue',   'red',    'purple', 'orange', 'darkgreen','darkblue']
-
-    # ── 連線：同天景點依序串接 ──────────────────────────────
-    from itertools import groupby
-    day_key = lambda s: s['day']
-    for day_num, group in groupby(sorted(all_spots, key=day_key), key=day_key):
-        spots_day = list(group)
-        color = DAY_COLORS[(day_num - 1) % len(DAY_COLORS)]
-
-        for i in range(len(spots_day) - 1):
-            a, b = spots_day[i], spots_day[i + 1]
-            coords = [[a['lat'], a['lng']], [b['lat'], b['lng']]]
-            t = get_transport(a['parent'], b['parent'])
-            alt_text = f"<br>備選：{t['alt']}" if t.get('alt') else ""
-            popup_html = (
-                f"<div style='font-size:13px;min-width:160px;'>"
-                f"<b>{a['name']} → {b['name']}</b><br>"
-                f"{t['mode']}<br>"
-                f"⏱️ {t['time']}{alt_text}"
-                f"</div>"
-            )
-
-            if HAS_ANTPATH:
-                AntPath(
-                    locations=coords,
-                    color=color,
-                    weight=4,
-                    opacity=0.8,
-                    delay=800,
-                    dash_array=[10, 20],
-                    popup=folium.Popup(popup_html, max_width=220),
-                ).add_to(m)
-            else:
-                folium.PolyLine(
-                    locations=coords,
-                    color=color, weight=3, opacity=0.7,
-                    popup=folium.Popup(popup_html, max_width=220),
-                ).add_to(m)
-
-            # 連線中點放交通時間 tooltip marker（小圓點）
-            mid_lat = (a['lat'] + b['lat']) / 2
-            mid_lng = (a['lng'] + b['lng']) / 2
-            folium.Marker(
-                location=[mid_lat, mid_lng],
-                icon=folium.DivIcon(
-                    html=(
-                        f'<div style="background:{color};color:white;'
-                        f'border-radius:10px;padding:2px 7px;font-size:11px;'
-                        f'white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3);">'
-                        f'{t["time"]}</div>'
-                    ),
-                    icon_size=(0, 0),
-                    icon_anchor=(0, 0),
-                ),
-                tooltip=f"{t['mode']} · {t['time']}",
-            ).add_to(m)
-
-    # ── 景點 Marker（含序號）────────────────────────────────
-    seq = {}   # name → 全域序號
-    counter = 1
-    for s in all_spots:
-        if s['name'] not in seq:
-            seq[s['name']] = counter
-            counter += 1
-
-    for s in all_spots:
-        color = MARKER_COLS[(s['day'] - 1) % len(MARKER_COLS)]
-        num   = seq[s['name']]
-        folium.Marker(
-            location=[s['lat'], s['lng']],
-            popup=folium.Popup(
-                f"<b>第 {s['day']} 天</b><br>📍 {s['name']}", max_width=180
-            ),
-            tooltip=f"#{num} {s['name']}",
-            icon=folium.Icon(color=color, icon='map-marker', prefix='fa'),
-        ).add_to(m)
-
-    # ── 圖例 ────────────────────────────────────────────────
-    legend_items = "".join(
-        f'<li style="margin:3px 0;">'
-        f'<span style="display:inline-block;width:14px;height:14px;'
-        f'background:{DAY_COLORS[(d-1)%len(DAY_COLORS)]};'
-        f'border-radius:3px;margin-right:6px;vertical-align:middle;"></span>'
-        f'第 {d} 天</li>'
-        for d in sorted({s['day'] for s in all_spots})
+    tag_html = "".join(
+        f'<span style="background:#e8f0e8;color:#3d5a3d;padding:3px 12px;'
+        f'border-radius:12px;font-size:13px;margin-right:8px;">{t}</span>'
+        for t in [f"👥 {companion}", f"🧭 {trip_type}", f"🗓️ {month}出發", f"⏱️ {days_count} 天"]
     )
-    legend_html = (
-        '<div style="position:fixed;bottom:30px;left:30px;z-index:1000;'
-        'background:white;padding:10px 14px;border-radius:8px;'
-        'box-shadow:0 2px 6px rgba(0,0,0,.2);font-size:13px;">'
-        f'<b>行程天數</b><ul style="margin:6px 0 0 0;padding:0;list-style:none;">'
-        f'{legend_items}</ul>'
-        '<p style="margin:6px 0 0 0;font-size:11px;color:#888;">點擊連線查看交通資訊</p>'
-        '</div>'
-    )
-    m.get_root().html.add_child(folium.Element(legend_html))
 
-    st_folium(m, use_container_width=True, height=480)
+    # ── 行程卡片 HTML（複用 _spot_card_html）───────────────
+    cards_html = ""
+    for day_data in itinerary_data.get('days', []):
+        cards_html += (
+            f'<div style="background:#5B8A5B;color:white;padding:8px 16px;'
+            f'border-radius:6px;margin:16px 0 8px 0;font-weight:bold;font-size:15px;">'
+            f'📅 第 {day_data["day"]} 天</div>'
+        )
+        for spot in day_data.get('spots', []):
+            cards_html += _spot_card_html(spot, travel_month_num)
 
+    # ── 完整 HTML ───────────────────────────────────────────
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>尼泊爾行程 · {days_count} 天 · {month}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: -apple-system, "Noto Sans TC", sans-serif;
+          background: #f7f5f0; color: #1a1a1a; padding: 24px 16px; }}
+  .container {{ max-width: 780px; margin: 0 auto; }}
+  header {{ background: #3D5A3D; color: white; padding: 20px 24px;
+            border-radius: 12px; margin-bottom: 24px; }}
+  header h1 {{ font-size: 22px; margin-bottom: 6px; }}
+  header p  {{ font-size: 13px; opacity: .8; margin-bottom: 12px; }}
+  .tags {{ display: flex; flex-wrap: wrap; gap: 6px; }}
+  @media print {{
+    body {{ background: white; padding: 0; }}
+    .no-print {{ display: none; }}
+  }}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>🏔️ 尼泊爾專屬行程</h1>
+    <p>由 AI 旅遊設計師根據您的偏好量身規劃</p>
+    <div class="tags">{tag_html}</div>
+  </header>
+  {cards_html}
+  <p style="text-align:center;color:#aaa;font-size:11px;margin-top:24px;">
+    由尼泊爾旅遊設計師生成 · 圖片來源 Wikipedia CC BY-SA
+  </p>
+</div>
+</body>
+</html>"""
 
 
 # ============================================================
@@ -894,7 +722,7 @@ with col_left:
     )
 
     # ── 對話歷史：原生捲動容器 ──────────────────────────────
-    history_box = st.container(height=360, border=False)
+    history_box = st.container(height=520, border=False)
     with history_box:
         if not st.session_state.conversation_history:
             st.markdown(
@@ -912,7 +740,7 @@ with col_left:
         user_input = st.text_area(
             label="",
             placeholder="詢問旅遊建議，或說「幫我規劃行程」…\n（Shift+Enter 換行，按送出送出）",
-            height=60,
+            height=90,
             label_visibility="collapsed",
         )
         submitted = st.form_submit_button("送出 ➤", use_container_width=True)
@@ -964,12 +792,31 @@ with col_left:
 # ══════════════════════════════════════════════════════════════
 with col_right:
     # ── 頂部工具列 ────────────────────────────────────────────
-    rc1, rc2 = st.columns([3, 1])
+    rc1, rc2, rc3 = st.columns([3, 1.2, 1])
     with rc1:
         planned = len(st.session_state.itinerary['days']) if st.session_state.itinerary else 0
-        label = f"📅 已規劃 {planned} 天行程" if planned else ""
-        st.markdown(f"<p style='font-size:15px;font-weight:600;color:#1a1a1a;margin:0 0 8px 0;'>{label}</p>", unsafe_allow_html=True)
+        label = f"📅 已規劃 {planned} 天行程" if planned else "📋 行程面板"
+        st.markdown(f"<p style='font-size:15px;font-weight:600;color:#1a1a1a;margin:6px 0;'>{label}</p>", unsafe_allow_html=True)
     with rc2:
+        if st.session_state.itinerary:
+            export_params = {**st.session_state.extracted_params}
+            # 補上使用者在確認小卡實際選的值（存在 session_state）
+            for k, sk in [('companion','confirm_companion'),('trip_type','confirm_trip_type')]:
+                if sk in st.session_state:
+                    export_params[k] = st.session_state[sk]
+            html_bytes = build_export_html(
+                st.session_state.itinerary,
+                export_params,
+                st.session_state.itinerary_month_num,
+            ).encode('utf-8')
+            st.download_button(
+                label="📥 匯出行程",
+                data=html_bytes,
+                file_name="nepal_itinerary.html",
+                mime="text/html",
+                use_container_width=True,
+            )
+    with rc3:
         if st.button("🔄 清空", use_container_width=True):
             st.session_state.itinerary = None
             st.session_state.conversation_history = []
@@ -1093,13 +940,12 @@ with col_right:
                     st.session_state.show_confirmation = False
                     st.rerun()
 
-    # ── 行程卡片 + 地圖（獨立捲動容器）────────────────────────
+    # ── 行程卡片（獨立捲動容器）─────────────────────────────
     if st.session_state.itinerary:
         total_days = len(st.session_state.itinerary['days'])
-        card_height = min(360, max(360, total_days * 360))   # 依天數動態調高度
+        card_height = min(700, max(400, total_days * 420))
         with st.container(height=card_height, border=False):
             show_itinerary_cards(st.session_state.itinerary, st.session_state.itinerary_month_num)
-        show_map(st.session_state.itinerary)
 
     # ── 尚無行程時的引導畫面 ──────────────────────────────────
     if not st.session_state.itinerary and not st.session_state.show_confirmation:
