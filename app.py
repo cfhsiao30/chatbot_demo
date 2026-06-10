@@ -1096,7 +1096,7 @@ with col_right:
     # ── 行程卡片 + 地圖（獨立捲動容器）────────────────────────
     if st.session_state.itinerary:
         total_days = len(st.session_state.itinerary['days'])
-        card_height = min(700, max(360, total_days * 360))   # 依天數動態調高度
+        card_height = min(360, max(360, total_days * 360))   # 依天數動態調高度
         with st.container(height=card_height, border=False):
             show_itinerary_cards(st.session_state.itinerary, st.session_state.itinerary_month_num)
         show_map(st.session_state.itinerary)
