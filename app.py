@@ -706,7 +706,7 @@ def extract_trip_params(history: list) -> dict:
 
 回傳格式（純 JSON，不可包含其他文字）：
 {{
-  "trip_type": "冒險健行 或 文化宗教 或 自然生態 或 null",
+  "trip_type": "根據對話內容用2-6個中文字描述旅遊偏好風格，例如：自然生態、文化宗教、冒險健行、輕鬆休閒、親子友善、銀髮輕旅遊 等，或 null",
   "companion": "個人獨旅 或 情侶同遊 或 親子同遊 或 長輩同行 或 null",
   "travel_month": "X月 格式（如 10月）或 null",
   "days": "整數天數（如 5），若對話中未提及則填 null"
@@ -923,10 +923,8 @@ with col_right:
         ai_companion = params.get('companion') or '個人獨旅'
         ai_companion_idx = companion_options.index(ai_companion) if ai_companion in companion_options else 0
 
-        # 旅遊偏好
-        type_options = ["冒險健行", "文化宗教", "自然生態"]
-        ai_trip_type = params.get('trip_type') or '文化宗教'
-        ai_type_idx = type_options.index(ai_trip_type) if ai_trip_type in type_options else 1
+        # 旅遊偏好（自由文字，AI 預填）
+        ai_trip_type = params.get('trip_type') or ''
 
         # 月份
         ai_month = params.get('travel_month') or '未指定'
@@ -960,9 +958,11 @@ with col_right:
                 "旅伴類型", companion_options,
                 index=ai_companion_idx, key="confirm_companion"
             )
-            confirm_trip_type = st.selectbox(
-                "旅遊偏好", type_options,
-                index=ai_type_idx, key="confirm_trip_type"
+            confirm_trip_type = st.text_input(
+                "旅遊偏好（AI 已根據對話預填，可直接修改）",
+                value=ai_trip_type,
+                placeholder="例如：自然生態、文化宗教、冒險健行、輕鬆休閒…",
+                key="confirm_trip_type"
             )
             confirm_must = st.multiselect(
                 "指定景點（選填）", df['景點名稱_中文'].tolist(), key="confirm_must"
@@ -993,7 +993,7 @@ with col_right:
                             summary = (
                                 f"✅ 已為你生成 **{int(confirm_days)} 天{confirm_trip_type}行程**"
                                 f"（{confirm_companion}，{final_month or '月份未定'}出發）\n\n"
-                                + "\n".join(
+                                + "\n\n".join(
                                     f"**第 {d['day']} 天**：{'、'.join(s['name'] for s in d['spots'])}"
                                     for d in result['days']
                                 )
