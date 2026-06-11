@@ -1,8 +1,12 @@
 streamlit
-google-genai
+pandas
 faiss-cpu
 sentence-transformers
-pandas
+numpy
 transformers
 torch
-numpy
+google-genai
+folium
+streamlit-folium
+requests
+folium>=0.14.0
