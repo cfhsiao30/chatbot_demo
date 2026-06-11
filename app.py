@@ -210,7 +210,7 @@ def _is_photo_url(url: str) -> bool:
 
 
 @st.cache_data(show_spinner=False)
-def fetch_commons_images(search_query: str, fallback_parent: str = "", limit: int = 6) -> list[str]:
+def fetch_commons_images(search_query: str, fallback_parent: str = "", limit: int = 10) -> list[str]:
     """搜尋 Wikimedia Commons，回傳最多 limit 個候選圖片 URL（list）。"""
     results = []
     for query in dict.fromkeys([search_query, WIKIPEDIA_TITLES.get(fallback_parent, "")]):
@@ -222,7 +222,7 @@ def fetch_commons_images(search_query: str, fallback_parent: str = "", limit: in
                 "generator": "search",
                 "gsrnamespace": "6",
                 "gsrsearch": query,
-                "gsrlimit": str(limit * 2),   # 多抓再過濾
+                "gsrlimit": str(limit * 3),
                 "prop": "imageinfo",
                 "iiprop": "url|size",
                 "iiurlwidth": "600",
@@ -253,25 +253,35 @@ def load_spot_image(search_query: str = "", parent: str = "", used_urls: set | N
     """
     圖片來源優先順序：
     ① Wikimedia Commons（以 search_query 精準搜，跳過 used_urls 中已用過的）
-    ② 本地 images/
-    ③ Wikimedia 硬編碼備援（同樣跳過已用過的）
+    ② search_query 加修飾詞變體再搜（避免候選耗盡）
+    ③ 本地 images/
+    ④ Wikimedia 硬編碼備援
     回傳 (來源, URL)。
     """
     if used_urls is None:
         used_urls = set()
 
+    # ① 主搜
     candidates = fetch_commons_images(search_query, parent)
     for url in candidates:
         if url not in used_urls:
             return 'web', url
 
-    # 本地圖片（不去重，本來就是精準對應）
+    # ② 變體重搜（加 landscape / scenery 強迫拿不同結果）
+    for suffix in ["landscape", "scenery", "view", "photo"]:
+        variant_query = f"{search_query} {suffix}"
+        variant_candidates = fetch_commons_images(variant_query, parent)
+        for url in variant_candidates:
+            if url not in used_urls:
+                return 'web', url
+
+    # ③ 本地圖片
     for ext in ['.jpg', '.jpeg', '.png', '.webp']:
         path = Path(f"images/{parent}{ext}")
         if path.exists():
             return 'local', str(path)
 
-    # 硬編碼備援：依序找未用過的
+    # ④ 硬編碼備援
     if parent in WIKIMEDIA_IMAGES:
         url = WIKIMEDIA_IMAGES[parent]
         if url not in used_urls:
@@ -401,12 +411,16 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
 - name：具體活動或體驗名稱，可自由描述（例：「犀牛河獨木舟觀鳥」、「斯瓦揚布佛塔日出參拜」）
 - parent：必須從以下清單選一個最相關的景點名稱（用於資料對應，必須完全一致）：
   {valid_names_str}
-- search_query：2–4 個英文關鍵字，用於搜尋此活動的代表照片。規則：
-  · 必須使用具體地名或景觀名詞，不用動詞或抽象詞
-  · 交通/移動類活動：用目的地景觀名，例如 "Chitwan jungle Nepal"
-  · 自然活動：用地點+景物，例如 "Phewa Lake Pokhara"、"Rapti River Chitwan"
-  · 文化/宗教活動：用建築或儀式名，例如 "Swayambhunath temple"、"Pashupatinath cremation ghat"
-  · 健行活動：用山名或健行路線，例如 "Annapurna trek mountain"、"Langtang valley glacier"
+- search_query：2–4 個英文關鍵字，用於 Wikimedia Commons 搜尋此活動的代表照片。嚴格規則：
+  · 【最重要】整趟行程每個 search_query 必須完全不同，不可有任何兩個活動使用相同的關鍵字組合
+  · 必須使用能精準識別「這個活動」的專有名詞，不用泛用詞（不用 Nepal、travel、tour、view）
+  · 交通/飛機類：用出發地機場或到達地景觀，例如 "Pokhara airport runway"、"Kathmandu tribhuvan airport"
+  · 湖泊活動：區分具體活動，例如 "Phewa Lake boat rowing"、"Begnas Lake morning reflection"、"Rupa Lake fishing"
+  · 叢林活動：用具體動物或地貌，例如 "Chitwan rhino grassland"、"Rapti river elephant bathing"、"Bardiya tiger reserve"
+  · 文化活動：用建築全名，例如 "Swayambhunath stupa"、"Boudhanath stupa night"、"Pashupatinath cremation ghat"
+  · 健行活動：用山峰或路段名，例如 "Annapurna base camp trail"、"Sarangkot sunrise Pokhara"
+  · 市集/街道：用地區名稱，例如 "Pokhara lakeside market"、"Thamel street Kathmandu"
+  · 同一景點不同活動：必須用不同的修飾詞區分，例如第一次用 "Chitwan elephant safari" 後，下一個用 "Chitwan jungle walk"
 
 各景點參考資訊：
 {all_spots_info}
@@ -420,7 +434,7 @@ def generate_itinerary(trip_type: str, total_days: int, travel_month: str = "", 
         {{
           "name": "具體活動名稱",
           "parent": "對應景點（必須符合上方清單）",
-          "search_query": "English keywords for image search",
+          "search_query": "unique English keywords for THIS specific activity",
           "duration": "建議停留時間",
           "food": "餐食建議（一句話）",
           "tip": "小提醒（一句話）"
@@ -469,39 +483,39 @@ def generate_answer(query, retrieved_docs, history):
             score = last_turn.get('emotion_score', 0.0)
             emotion_feedback = f"請注意，上一次回答的情緒是 {emotion_label} (信心值 {score:.3f})，請在本次回答中保持親切、專業的語氣，並依據對話歷史來調整回應風格。"
 
-    prompt = f"""
-你是一位專業且親切的尼泊爾旅遊助理，就像貼心旅伴。請依照以下指示回答使用者問題：
+    prompt = f"""你是「尼泊小編」，一個超懂尼泊爾的旅遊好朋友，現在在跟旅客用 LINE 聊天。
 
- **整合資訊**
- - 請務必全面整合檢索到的景點資訊，包含「好評度」、「最佳造訪季節」、「特色活動或體驗」、「地點類型」、「適合族群建議」、「平均停留時間建議」、「常見抱怨或負評原因」和「關聯景點建議」。
- - 將資訊整理成完整、個人化的旅遊建議。
+【說話風格——必須遵守】
+- 像朋友傳 LINE 一樣說話，不要像客服或導遊
+- 短句為主，一個意思一行，自然換行，不用項目符號「-」或「•」
+- 不用粗體（**文字**），不用標題（###），不用條列清單
+- emoji 用在句首或句尾引導重點，每則訊息 3–5 個就好，不要每句都加
+- 偶爾用「欸」「其實」「對了」「說真的」等口語開頭
+- 數字資訊（時間、評分）直接夾在句子裡說，不要另起一行標注
+- 結尾用輕鬆的一句話收，可以是小提醒、反問或邀請繼續聊
 
- **回答重點**
- - 提供景點推薦、行程規劃、交通建議、天氣提示、住宿選擇、小提醒。
- - 若使用者提到偏好，請優先考慮並明確回應。
- - 簡要說明不同景點間的地理位置或交通考量，幫助規劃順遊路線。
+【內容規則】
+- 整合景點的好評度、季節、特色、適合族群、停留時間、常見抱怨自然融入對話
+- 好評度 > 91% 可以說「超多人推」「評價很高」，不用直接說百分比
+- 有缺點就坦白講，但語氣輕鬆，例如「不過人有點多就是了」
+- 一則回覆控制在 5–8 句話，不要寫太長
 
- **對話連貫性**
- - 結合對話歷史，保持回答連貫，避免前後矛盾。
+【規劃意圖處理】
+- 若使用者說「幫我規劃」「排行程」之類的，不要自己列行程
+- 改為用口語確認你掌握到的偏好（旅伴、想玩什麼、幾天、哪個月）
+- 最後說「右邊確認一下再點生成，我幫你排好好的✨」
 
- **格式與語氣**
- - 使用 Markdown 或清單排版，清楚呈現資訊。
- - 中文回答，保持自然、不誇張、親切且專業的語氣。
- - 5-7 句話內提供建議，避免重複或制式回答。
- - 好評度 > 91% 的景點可特別強調，低於 91% 則不用強調。
+【對話連貫性】
+- 記住前面聊過的內容，不要重複問同樣的事
+- 如果使用者語氣輕鬆，你也跟著輕鬆；語氣認真就稍微正式一點
 
- **規劃意圖處理**
- - 若使用者的問題包含「規劃行程」、「安排行程」、「幫我排」等規劃請求，請【不要】自行列出行程，
-   改為簡短確認你已掌握的偏好摘要（旅伴、偏好類型、天數、月份），
-   並告知「請在右側確認後點『生成專屬行程』，我會為你生成完整行程卡片」。
-
-以下是對話歷史：
+對話歷史：
 {memory}
 
-檢索到的景點資訊：
+景點資訊（自然融入，不要逐條列出）：
 {context}
 
-使用者問題：
+使用者說：
 {query}
 """
     return gemini_call(prompt).strip()
